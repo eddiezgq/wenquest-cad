@@ -1,0 +1,21 @@
+diff --git a/src/App/Document.cpp b/src/App/Document.cpp
+index 6be2d89ad6..0c7949171e 100644
+--- a/src/App/Document.cpp
++++ b/src/App/Document.cpp
+@@ -2734,7 +2734,15 @@ int Document::recompute(const std::vector<DocumentObject*>& objs,
+                         }
+                         // if something happened filter all object in its
+                         // inListRecursive from the queue then proceed
+-                        obj->getInListEx(filter, true);
++                        std::set<DocumentObject*> skipped;
++                        obj->getInListEx(skipped, true);
++                        // The skipped objects keep the shape they had before this recompute.
++                        // Leave them touched so that they are not reported as up to date
++                        // (and are retried by the next recompute).
++                        for (auto dep : skipped) {
++                            dep->enforceRecompute();
++                        }
++                        filter.insert(skipped.begin(), skipped.end());
+                         filter.insert(obj);
+                         continue;
+                     }

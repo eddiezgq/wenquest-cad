@@ -1,0 +1,71 @@
+diff --git a/src/Mod/Part/App/Geometry.cpp b/src/Mod/Part/App/Geometry.cpp
+index b93a11b2d3..a899d8885f 100644
+--- a/src/Mod/Part/App/Geometry.cpp
++++ b/src/Mod/Part/App/Geometry.cpp
+@@ -1011,27 +1011,48 @@ bool GeomCurve::closestParameter(const Base::Vector3d& point, double& u) const
+         if (!curve.IsNull()) {
+             gp_Pnt pnt(point.x, point.y, point.z);
+             GeomAPI_ProjectPointOnCurve ppc(pnt, curve);
+-            u = ppc.LowerDistanceParameter();
+-            return true;
+-        }
+-    }
+-    catch (StdFail_NotDone& exc) {
+-        if (curve->IsKind(STANDARD_TYPE(Geom_BoundedCurve))) {
+-            Base::Vector3d firstpoint = this->pointAtParameter(curve->FirstParameter());
+-            Base::Vector3d lastpoint = this->pointAtParameter(curve->LastParameter());
+-
+-            if ((firstpoint - point).Length() < (lastpoint - point).Length()) {
+-                u = curve->FirstParameter();
++            bool found = false;
++            double best = Precision::Infinite();
++            if (ppc.NbPoints() > 0) {
++                u = ppc.LowerDistanceParameter();
++                best = ppc.LowerDistance();
++                found = true;
+             }
+-            else {
+-                u = curve->LastParameter();
++            // GeomAPI_ProjectPointOnCurve returns orthogonal projections only. On a bounded
++            // curve the nearest point can be an end point, even when an orthogonal projection
++            // exists (e.g. a point beyond the end of an arc): compare with the end points.
++            if (curve->IsKind(STANDARD_TYPE(Geom_BoundedCurve))) {
++                const double ends[2] = {curve->FirstParameter(), curve->LastParameter()};
++                for (double t : ends) {
++                    double d = curve->Value(t).Distance(pnt);
++                    if (d < best) {
++                        best = d;
++                        u = t;
++                        found = true;
++                    }
++                }
+             }
++            if (!found) {
++                // No orthogonal projection on an unbounded curve: this happens when every point
++                // is equally near (the centre of a circle). Any parameter is then a nearest one.
++                double first = curve->FirstParameter();
++                double last = curve->LastParameter();
++                if (!Precision::IsInfinite(first) && !Precision::IsInfinite(last)) {
++                    double d0 = curve->Value(first).Distance(pnt);
++                    bool equal = true;
++                    for (int k = 1; k < 16 && equal; ++k) {
++                        double d = curve->Value(first + (last - first) * k / 16).Distance(pnt);
++                        equal = std::abs(d - d0) <= Precision::Confusion() * std::max(1.0, d0);
++                    }
++                    if (equal) {
++                        u = first;
++                        return true;
++                    }
++                }
++                THROWM(Base::CADKernelError, "No nearest point found on the curve")
++            }
++            return true;
+         }
+-        else {
+-            THROWM(Base::CADKernelError, exc.GetMessageString())
+-        }
+-
+-        return true;
+     }
+     catch (Standard_Failure& exc) {
+         THROWM(Base::CADKernelError, exc.GetMessageString())

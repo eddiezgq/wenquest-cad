@@ -1,0 +1,23 @@
+diff --git a/src/Mod/Mesh/App/Core/Triangulation.cpp b/src/Mod/Mesh/App/Core/Triangulation.cpp
+index 83ccd4450c..af2fb75ebc 100644
+--- a/src/Mod/Mesh/App/Core/Triangulation.cpp
++++ b/src/Mod/Mesh/App/Core/Triangulation.cpp
+@@ -737,8 +737,16 @@ bool DelaunayTriangulator::Triangulate()
+         akVertex.emplace_back(static_cast<double>(point.x), static_cast<double>(point.y));
+     }
+ 
+-    Wm4::Delaunay2d
+-        del(static_cast<int>(akVertex.size()), akVertex.data(), 0.001, false, Wm4::Query::QT_INT64);
++    // Exact predicates on the input coordinates. QT_INT64 truncates the points to a 2^16 grid
++    // over their bounding box, so points closer than 1/65536 of its size get the same integer
++    // coordinates and the triangulation folds over; an epsilon of 1e-3 declares every point set
++    // thinner than 1/1000 of its length collinear and no triangle is created at all. The
++    // polygons triangulated here are small, the cost of rational arithmetic does not matter.
++    Wm4::Delaunay2d del(static_cast<int>(akVertex.size()),
++                        akVertex.data(),
++                        1e-12,
++                        false,
++                        Wm4::Query::QT_RATIONAL);
+     int iTQuantity = del.GetSimplexQuantity();
+     auto numFaces = static_cast<std::size_t>(iTQuantity);
+     std::vector<int> aiTVertex(3 * numFaces);

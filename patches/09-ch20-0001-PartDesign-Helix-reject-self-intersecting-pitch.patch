@@ -1,0 +1,29 @@
+diff --git a/src/Mod/PartDesign/App/FeatureHelix.cpp b/src/Mod/PartDesign/App/FeatureHelix.cpp
+index df1cecb4ab..9a912d7184 100644
+--- a/src/Mod/PartDesign/App/FeatureHelix.cpp
++++ b/src/Mod/PartDesign/App/FeatureHelix.cpp
+@@ -302,6 +302,24 @@ App::DocumentObjectExecReturn* Helix::execute()
+         );
+     }
+ 
++    // The task panel warns when the pitch is below safePitch(), but the feature itself did not
++    // check: in scripts, macros and recomputes a self-intersecting solid was stored without an error.
++    if (mode != HelixMode::height_turns_growth && Turns.getValue() >= 1.0) {
++        double minPitch = 0.0;
++        try {
++            minPitch = safePitch();
++        }
++        catch (const Base::Exception&) {
++            minPitch = 0.0;  // the profile errors are reported below
++        }
++        if (Pitch.getValue() < minPitch - Precision::Confusion()) {
++            return new App::DocumentObjectExecReturn(QT_TRANSLATE_NOOP(
++                "Exception",
++                "Error: the pitch is smaller than the profile allows; the result would intersect itself"
++            ));
++        }
++    }
++
+     TopoDS_Shape sketchshape;  // Fixme: Should this be TopoShape here and below?
+     try {
+         sketchshape = getVerifiedFace();

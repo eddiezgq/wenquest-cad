@@ -1,0 +1,80 @@
+diff --git a/src/Mod/CAM/App/Area.cpp b/src/Mod/CAM/App/Area.cpp
+index 4bff07f0e0..538d7a693a 100644
+--- a/src/Mod/CAM/App/Area.cpp
++++ b/src/Mod/CAM/App/Area.cpp
+@@ -2355,6 +2355,11 @@ TopoDS_Shape Area::makeOffset(
+     build();
+     AREA_SECTION(makeOffset, index, PARAM_FIELDS(PARAM_FARG, AREA_PARAMS_OFFSET), reorient, from_center);
+ 
++    // Apply this Area's libarea parameters (FitArcs, Accuracy, ClipperScale, ...) while
++    // offsetting and converting back to shapes, as getShape() and makePocket() do.
++    // Without it the offset uses whatever global libarea settings happen to be active.
++    CAreaConfig conf(myParams);
++
+     std::list<shared_ptr<CArea>> areas;
+     makeOffset(areas, PARAM_FIELDS(PARAM_FARG, AREA_PARAMS_OFFSET), from_center);
+     if (areas.empty()) {
+diff --git a/src/Mod/CAM/CAMTests/TestPathAreaOffset.py b/src/Mod/CAM/CAMTests/TestPathAreaOffset.py
+new file mode 100644
+index 0000000000..83af321865
+--- /dev/null
++++ b/src/Mod/CAM/CAMTests/TestPathAreaOffset.py
+@@ -0,0 +1,34 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++"""Path.Area.makeOffset must use the parameters set on the Area, as getShape does
++("FreeCAD kernel: decode, verify, correct", chapter 34)."""
++import unittest
++
++import FreeCAD as App
++import Part
++import Path
++
++
++def circles(shape):
++    return sum(1 for e in shape.Edges if isinstance(e.Curve, Part.Circle))
++
++
++class TestPathAreaOffset(unittest.TestCase):
++    def setUp(self):
++        self.face = Part.Face(Part.Wire(Part.makeCircle(10, App.Vector(0, 0, 0), App.Vector(0, 0, 1))))
++
++    def area(self, **params):
++        a = Path.Area()
++        a.setParams(**params)
++        a.add(self.face)
++        return a
++
++    def test_fit_arcs_off_gives_no_arcs(self):
++        shape = self.area(FitArcs=False, Accuracy=0.01).makeOffset(offset=3.0)
++        self.assertEqual(circles(shape), 0)
++
++    def test_make_offset_matches_get_shape(self):
++        for fit in (True, False):
++            by_offset = self.area(FitArcs=fit, Accuracy=0.01).makeOffset(offset=3.0)
++            by_shape = self.area(FitArcs=fit, Accuracy=0.01, Offset=3.0).getShape()
++            self.assertEqual(len(by_offset.Edges), len(by_shape.Edges))
++            self.assertEqual(circles(by_offset), circles(by_shape))
+diff --git a/src/Mod/CAM/CMakeLists.txt b/src/Mod/CAM/CMakeLists.txt
+index 9bba3add3d..41b19ea9d2 100644
+--- a/src/Mod/CAM/CMakeLists.txt
++++ b/src/Mod/CAM/CMakeLists.txt
+@@ -551,6 +551,7 @@ SET(Tests_SRCS
+     CAMTests/TestPathToolLibrarySerializer.py
+     CAMTests/TestPathToolMachine.py
+     CAMTests/TestPathToolController.py
++    CAMTests/TestPathAreaOffset.py
+     CAMTests/TestPathUtil.py
+     CAMTests/TestPathVcarve.py
+     CAMTests/TestPathVoronoi.py
+diff --git a/src/Mod/CAM/TestCAMApp.py b/src/Mod/CAM/TestCAMApp.py
+index 808c0ba2f4..fbf285614e 100644
+--- a/src/Mod/CAM/TestCAMApp.py
++++ b/src/Mod/CAM/TestCAMApp.py
+@@ -93,6 +93,7 @@ from CAMTests.TestPathToolLibrarySerializer import (
+ from CAMTests.TestPathToolChangeGenerator import TestPathToolChangeGenerator
+ from CAMTests.TestPathToolController import TestPathToolController
+ from CAMTests.TestPathToolMachine import TestPathToolMachine
++from CAMTests.TestPathAreaOffset import TestPathAreaOffset
+ from CAMTests.TestPathUtil import TestPathUtil
+ from CAMTests.TestPathVcarve import TestPathVcarve
+ from CAMTests.TestPathVoronoi import TestPathVoronoi

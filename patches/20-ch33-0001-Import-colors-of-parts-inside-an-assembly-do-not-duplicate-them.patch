@@ -1,0 +1,120 @@
+diff --git a/src/Mod/Import/App/AppImportPy.cpp b/src/Mod/Import/App/AppImportPy.cpp
+index bef8a15adb..b2dd45df18 100644
+--- a/src/Mod/Import/App/AppImportPy.cpp
++++ b/src/Mod/Import/App/AppImportPy.cpp
+@@ -26,6 +26,7 @@
+ # define WNT  // avoid conflict with GUID
+ #endif
+ 
++#include <algorithm>
+ #include <boost/algorithm/string/predicate.hpp>
+ #include <boost/range/adaptor/indexed.hpp>
+ #if defined(__clang__)
+@@ -290,6 +291,7 @@ private:
+         try {
+             Py::Sequence list(object);
+             std::vector<App::DocumentObject*> objs;
++            std::vector<App::DocumentObject*> coloredObjs;
+             std::map<Part::Feature*, std::vector<Base::Color>> partColor;
+             for (Py::Sequence::iterator it = list.begin(); it != list.end(); ++it) {
+                 PyObject* item = (*it).ptr();
+@@ -304,7 +306,7 @@ private:
+                     if (PyObject_TypeCheck(item0.ptr(), &(App::DocumentObjectPy::Type))) {
+                         auto pydoc = static_cast<App::DocumentObjectPy*>(item0.ptr());
+                         App::DocumentObject* obj = pydoc->getDocumentObjectPtr();
+-                        objs.push_back(obj);
++                        coloredObjs.push_back(obj);
+                         if (Part::Feature* part = dynamic_cast<Part::Feature*>(obj)) {
+                             App::PropertyColorList colors;
+                             colors.setPyObject(item1.ptr());
+@@ -314,6 +316,19 @@ private:
+                 }
+             }
+ 
++            // An (object, colors) tuple gives the colors of a part. Without the GUI this is the
++            // only way to export colors, so the object is exported only if no other exported
++            // object already contains it: the colors of a part inside an App::Part assembly
++            // must not add a second, top-level copy of the part to the file.
++            for (auto obj : coloredObjs) {
++                bool contained = std::any_of(objs.begin(), objs.end(), [obj](App::DocumentObject* o) {
++                    return o != obj && o->isInOutListRecursive(obj);
++                });
++                if (!contained && std::find(objs.begin(), objs.end(), obj) == objs.end()) {
++                    objs.push_back(obj);
++                }
++            }
++
+             Handle(XCAFApp_Application) hApp = XCAFApp_Application::GetApplication();
+             Handle(TDocStd_Document) hDoc;
+             hApp->NewDocument(TCollection_ExtendedString("MDTV-CAF"), hDoc);
+diff --git a/src/Mod/Import/CMakeLists.txt b/src/Mod/Import/CMakeLists.txt
+index 0d7a2786f4..7536859895 100644
+--- a/src/Mod/Import/CMakeLists.txt
++++ b/src/Mod/Import/CMakeLists.txt
+@@ -44,6 +44,7 @@ SET(DXF_Plate
+ set(Import_Scripts
+     Init.py
+     stepZ.py
++    TestImportApp.py
+ )
+ 
+ if(BUILD_GUI)
+diff --git a/src/Mod/Import/Init.py b/src/Mod/Import/Init.py
+index 0c7004fa91..d5d9b19b02 100644
+--- a/src/Mod/Import/Init.py
++++ b/src/Mod/Import/Init.py
+@@ -36,3 +36,4 @@ FreeCAD.addImportType("STEPZ Zip File Type (*.stpZ *.stpz *.STPZ)", "stepZ")
+ FreeCAD.addImportType("glTF (*.gltf *.GLTF *.glb *.GLB)", "ImportGui")
+ FreeCAD.addExportType("STEPZ zip File Type (*.stpZ *.stpz)", "stepZ")
+ FreeCAD.addExportType("glTF (*.gltf *.glb)", "ImportGui")
++FreeCAD.__unit_test__ += ["TestImportApp"]
+diff --git a/src/Mod/Import/TestImportApp.py b/src/Mod/Import/TestImportApp.py
+new file mode 100644
+index 0000000000..98b07a777d
+--- /dev/null
++++ b/src/Mod/Import/TestImportApp.py
+@@ -0,0 +1,44 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++"""Import module tests that run without the GUI ("FreeCAD kernel: decode, verify, correct", chapter 33)."""
++import os
++import tempfile
++import unittest
++
++import FreeCAD as App
++import Import
++import Part
++
++
++class ExportColorsTests(unittest.TestCase):
++    def setUp(self):
++        self.doc = App.newDocument("ExportColors")
++        self.asm = self.doc.addObject("App::Part", "Assembly")
++        self.parts = []
++        for i in range(2):
++            f = self.doc.addObject("Part::Feature", f"Box{i}")
++            f.Shape = Part.makeBox(10, 10, 10, App.Vector(20 * i, 0, 0))
++            self.asm.addObject(f)
++            self.parts.append(f)
++        self.doc.recompute()
++        self.path = os.path.join(tempfile.mkdtemp(), "colors.step")
++
++    def tearDown(self):
++        App.closeDocument(self.doc.Name)
++
++    def reimported_features(self):
++        doc = App.newDocument("ExportColorsBack")
++        try:
++            Import.insert(self.path, doc.Name)
++            return [o for o in doc.Objects if o.TypeId == "Part::Feature"]
++        finally:
++            App.closeDocument(doc.Name)
++
++    def test_colors_of_parts_inside_an_assembly_do_not_duplicate_them(self):
++        colors = [(1.0, 0.0, 0.0, 1.0)] * 6
++        Import.export([self.asm] + [(p, colors) for p in self.parts], self.path)
++        self.assertEqual(len(self.reimported_features()), len(self.parts))
++
++    def test_tuples_alone_still_export_their_objects(self):
++        colors = [(0.0, 0.0, 1.0, 1.0)] * 6
++        Import.export([(p, colors) for p in self.parts], self.path)
++        self.assertEqual(len(self.reimported_features()), len(self.parts))

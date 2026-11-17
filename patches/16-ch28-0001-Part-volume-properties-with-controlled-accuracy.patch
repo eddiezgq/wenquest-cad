@@ -1,0 +1,161 @@
+diff --git a/src/Mod/Part/App/TopoShape.cpp b/src/Mod/Part/App/TopoShape.cpp
+index 39e08f2376..e056239509 100644
+--- a/src/Mod/Part/App/TopoShape.cpp
++++ b/src/Mod/Part/App/TopoShape.cpp
+@@ -1195,13 +1195,51 @@ Base::BoundBox3d TopoShape::getBoundBoxOptimal() const
+     return box;
+ }
+ 
++void TopoShape::volumeProperties(const TopoDS_Shape& shape, GProp_GProps& props, bool volumeOnly)
++{
++    // The default rule is accurate on planes and the elementary quadrics; keep it there, so that the
++    // results for such shapes do not change at all (e.g. principal axes of equal moments).
++    bool elementary = true;
++    for (TopExp_Explorer xp(shape, TopAbs_FACE); xp.More() && elementary; xp.Next()) {
++        switch (BRepAdaptor_Surface(TopoDS::Face(xp.Current()), false).GetType()) {
++            case GeomAbs_Plane:
++            case GeomAbs_Cylinder:
++            case GeomAbs_Cone:
++            case GeomAbs_Sphere:
++            case GeomAbs_Torus:
++                break;
++            default:
++                elementary = false;
++        }
++    }
++    if (elementary) {
++        BRepGProp::VolumeProperties(shape, props);
++        return;
++    }
++    if (volumeOnly) {
++        GProp_GProps gk;
++        if (BRepGProp::VolumePropertiesGK(shape, gk, 1.0e-9, false, true, false, false) >= 0.0) {
++            props = gk;
++            return;
++        }
++    }
++    else {
++        GProp_GProps adaptive;
++        if (BRepGProp::VolumeProperties(shape, adaptive, 1.0e-9) >= 0.0) {
++            props = adaptive;
++            return;
++        }
++    }
++    BRepGProp::VolumeProperties(shape, props);
++}
++
+ namespace
+ {
+ bool getShapeProperties(const TopoDS_Shape& shape, GProp_GProps& prop)
+ {
+     TopExp_Explorer xpSolid(shape, TopAbs_SOLID);
+     if (xpSolid.More()) {
+-        BRepGProp::VolumeProperties(shape, prop);
++        TopoShape::volumeProperties(shape, prop);
+         return true;
+     }
+ 
+diff --git a/src/Mod/Part/App/TopoShape.h b/src/Mod/Part/App/TopoShape.h
+index dca4704d25..900804bc83 100644
+--- a/src/Mod/Part/App/TopoShape.h
++++ b/src/Mod/Part/App/TopoShape.h
+@@ -47,6 +47,7 @@
+ #include <ShapeFix_Root.hxx>
+ 
+ class gp_Ax1;
++class GProp_GProps;
+ class gp_Ax2;
+ class gp_Pln;
+ class gp_Vec;
+@@ -328,6 +329,11 @@ public:
+     Base::BoundBox3d getBoundBoxOptimal() const;
+     bool getCenterOfGravity(Base::Vector3d& center) const override;
+     static void convertTogpTrsf(const Base::Matrix4D& mtrx, gp_Trsf& trsf);
++    /// Volume properties with controlled accuracy: Gauss-Kronrod for the volume alone,
++    /// adaptive Gauss (relative error 1e-9 for the mass) when centre and inertia are needed.
++    /// The default BRepGProp::VolumeProperties uses a fixed-order rule that is exact only for
++    /// polynomial integrands and is off by up to about 1% on rational (NURBS) faces.
++    static void volumeProperties(const TopoDS_Shape& shape, GProp_GProps& props, bool volumeOnly = false);
+     static void convertToMatrix(const gp_Trsf& trsf, Base::Matrix4D& mtrx);
+     static Base::Matrix4D convert(const gp_Trsf& trsf);
+     static gp_Trsf convert(const Base::Matrix4D& mtrx);
+diff --git a/src/Mod/Part/App/TopoShapePyImp.cpp b/src/Mod/Part/App/TopoShapePyImp.cpp
+index b93fa6c9ad..3e4b695be8 100644
+--- a/src/Mod/Part/App/TopoShapePyImp.cpp
++++ b/src/Mod/Part/App/TopoShapePyImp.cpp
+@@ -2852,7 +2852,7 @@ Py::Float TopoShapePy::getVolume() const
+         throw Py::RuntimeError("shape is invalid");
+     }
+     GProp_GProps props;
+-    BRepGProp::VolumeProperties(shape, props);
++    TopoShape::volumeProperties(shape, props, true);
+     return Py::Float(props.Mass());
+ }
+ 
+diff --git a/src/Mod/Part/App/TopoShapeSolidPyImp.cpp b/src/Mod/Part/App/TopoShapeSolidPyImp.cpp
+index 2b75f0eccf..740ff6b107 100644
+--- a/src/Mod/Part/App/TopoShapeSolidPyImp.cpp
++++ b/src/Mod/Part/App/TopoShapeSolidPyImp.cpp
+@@ -104,7 +104,7 @@ int TopoShapeSolidPy::PyInit(PyObject* args, PyObject* /*kwd*/)
+ Py::Float TopoShapeSolidPy::getMass() const
+ {
+     GProp_GProps props;
+-    BRepGProp::VolumeProperties(getTopoShapePtr()->getShape(), props);
++    TopoShape::volumeProperties(getTopoShapePtr()->getShape(), props, true);
+     double c = props.Mass();
+     return Py::Float(c);
+ }
+@@ -112,7 +112,7 @@ Py::Float TopoShapeSolidPy::getMass() const
+ Py::Object TopoShapeSolidPy::getCenterOfMass() const
+ {
+     GProp_GProps props;
+-    BRepGProp::VolumeProperties(getTopoShapePtr()->getShape(), props);
++    TopoShape::volumeProperties(getTopoShapePtr()->getShape(), props);
+     gp_Pnt c = props.CentreOfMass();
+     return Py::Vector(Base::Vector3d(c.X(), c.Y(), c.Z()));
+ }
+@@ -120,7 +120,7 @@ Py::Object TopoShapeSolidPy::getCenterOfMass() const
+ Py::Object TopoShapeSolidPy::getMatrixOfInertia() const
+ {
+     GProp_GProps props;
+-    BRepGProp::VolumeProperties(getTopoShapePtr()->getShape(), props);
++    TopoShape::volumeProperties(getTopoShapePtr()->getShape(), props);
+     gp_Mat m = props.MatrixOfInertia();
+     Base::Matrix4D mat;
+     for (int i = 0; i < 3; i++) {
+@@ -134,7 +134,7 @@ Py::Object TopoShapeSolidPy::getMatrixOfInertia() const
+ Py::Object TopoShapeSolidPy::getStaticMoments() const
+ {
+     GProp_GProps props;
+-    BRepGProp::VolumeProperties(getTopoShapePtr()->getShape(), props);
++    TopoShape::volumeProperties(getTopoShapePtr()->getShape(), props);
+     Standard_Real lx, ly, lz;
+     props.StaticMoments(lx, ly, lz);
+     Py::Tuple tuple(3);
+@@ -147,7 +147,7 @@ Py::Object TopoShapeSolidPy::getStaticMoments() const
+ Py::Dict TopoShapeSolidPy::getPrincipalProperties() const
+ {
+     GProp_GProps props;
+-    BRepGProp::VolumeProperties(getTopoShapePtr()->getShape(), props);
++    TopoShape::volumeProperties(getTopoShapePtr()->getShape(), props);
+     GProp_PrincipalProps pprops = props.PrincipalProperties();
+ 
+     Py::Dict dict;
+@@ -207,7 +207,7 @@ PyObject* TopoShapeSolidPy::getMomentOfInertia(PyObject* args) const
+ 
+     try {
+         GProp_GProps props;
+-        BRepGProp::VolumeProperties(getTopoShapePtr()->getShape(), props);
++        TopoShape::volumeProperties(getTopoShapePtr()->getShape(), props);
+         double r = props.MomentOfInertia(
+             gp_Ax1(Base::convertTo<gp_Pnt>(pnt), Base::convertTo<gp_Dir>(dir))
+         );
+@@ -231,7 +231,7 @@ PyObject* TopoShapeSolidPy::getRadiusOfGyration(PyObject* args) const
+ 
+     try {
+         GProp_GProps props;
+-        BRepGProp::VolumeProperties(getTopoShapePtr()->getShape(), props);
++        TopoShape::volumeProperties(getTopoShapePtr()->getShape(), props);
+         double r = props.RadiusOfGyration(
+             gp_Ax1(Base::convertTo<gp_Pnt>(pnt), Base::convertTo<gp_Dir>(dir))
+         );

@@ -1,0 +1,203 @@
+diff --git a/src/Mod/Mesh/App/Core/Degeneration.cpp b/src/Mod/Mesh/App/Core/Degeneration.cpp
+index 8d526c3bc5..397a588fcd 100644
+--- a/src/Mod/Mesh/App/Core/Degeneration.cpp
++++ b/src/Mod/Mesh/App/Core/Degeneration.cpp
+@@ -31,6 +31,7 @@
+ #include <boost/math/special_functions/fpclassify.hpp>
+ 
+ #include "Degeneration.h"
++#include "Evaluation.h"
+ #include "Grid.h"
+ #include "Iterator.h"
+ #include "TopoAlgorithm.h"
+@@ -517,16 +518,26 @@ bool MeshFixDegeneratedFacets::Fixup()
+ {
+     MeshTopoAlgorithm cTopAlg(_rclMesh);
+ 
+-    MeshFacetIterator it(_rclMesh);
+-    for (it.Init(); it.More(); it.Next()) {
+-        if (it->IsDegenerated(fEpsilon)) {
+-            FacetIndex uId = it.Position();
+-            bool removed = cTopAlg.RemoveDegeneratedFacet(uId);
+-            if (removed) {
+-                // due to a modification of the array the iterator became invalid
+-                it.Set(uId - 1);
++    // Walk the facets by index. RemoveDegeneratedFacet() either deletes the facet (the following
++    // facets move down by one, so the same index is examined again) or swaps an edge with a
++    // neighbour (the facet stays). After a swap move on: if the neighbour is degenerate as well,
++    // examining the same facet again can swap the same edge back and forth for ever.
++    FacetIndex index = 0;
++    while (index < _rclMesh.CountFacets()) {
++        if (_rclMesh.GetFacet(index).IsDegenerated(fEpsilon)) {
++            std::size_t count = _rclMesh.CountFacets();
++            if (cTopAlg.RemoveDegeneratedFacet(index) && _rclMesh.CountFacets() < count) {
++                continue;
+             }
+         }
++        index++;
++    }
++
++    // Swaps and deletions among many adjacent degenerate facets can leave neighbour links that no
++    // longer match the point indices (RemoveDegeneratedFacet() then meets a neighbour that does not
++    // refer back). Rebuild the links from the point indices so that the mesh stays consistent.
++    if (!MeshEvalNeighbourhood(_rclMesh).Evaluate()) {
++        _rclMesh.RebuildNeighbours();
+     }
+ 
+     return true;
+diff --git a/src/Mod/Mesh/App/Core/TopoAlgorithm.cpp b/src/Mod/Mesh/App/Core/TopoAlgorithm.cpp
+index 2aad3c1e10..dbc0d8c46a 100644
+--- a/src/Mod/Mesh/App/Core/TopoAlgorithm.cpp
++++ b/src/Mod/Mesh/App/Core/TopoAlgorithm.cpp
+@@ -1600,6 +1600,11 @@ bool MeshTopoAlgorithm::RemoveDegeneratedFacet(FacetIndex index)
+                 // get the neighbour and common edge side
+                 MeshFacet& rNb = _rclMesh._aclFacetArray[uN1];
+                 unsigned short side = rNb.Side(index);
++                if (side == std::numeric_limits<unsigned short>::max()) {
++                    // The neighbourhood is inconsistent (the neighbour does not refer back to this
++                    // facet). Leave the facet alone: using 'side' as an index would write out of bounds.
++                    return false;
++                }
+ 
+                 // bend the point indices
+                 rFace._aulPoints[(j + 2) % 3] = rNb._aulPoints[(side + 2) % 3];
+diff --git a/src/Mod/Mesh/App/TestMeshFixDegenerations.py b/src/Mod/Mesh/App/TestMeshFixDegenerations.py
+new file mode 100644
+index 0000000000..cb85490772
+--- /dev/null
++++ b/src/Mod/Mesh/App/TestMeshFixDegenerations.py
+@@ -0,0 +1,112 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++"""Mesh.fixDegenerations on a mesh with many degenerate facets
++("FreeCAD kernel: decode, verify, correct", chapter 38).
++
++The mesh is a marching-tetrahedra surface of a cube with a hole, sampled on a grid whose planes contain the
++cube's faces (so many samples are exactly zero) and with those zeros pushed off by 1e-6 of the grid spacing:
++it has hundreds of needle facets. On FreeCAD 1.1.3 fixDegenerations() crashes on the 11^3 version of this mesh
++(out-of-bounds write in MeshTopoAlgorithm::RemoveDegeneratedFacet when a neighbour does not refer back) and
++never returns on the 21^3 version (MeshFixDegeneratedFacets::Fixup swaps the same edge back and forth)."""
++import os
++import struct
++import tempfile
++import unittest
++
++import Mesh
++import numpy as np
++
++_CORNERS = np.array([[(c >> 0) & 1, (c >> 1) & 1, (c >> 2) & 1] for c in range(8)])
++_TETS = [(0, 1, 3, 7), (0, 3, 2, 7), (0, 2, 6, 7), (0, 6, 4, 7), (0, 4, 5, 7), (0, 5, 1, 7)]
++
++
++def _field(n, lo):
++    """Signed distance of the cube [-1, 1]^3 with a hole of radius 0.5 along z (exact zero set), on the grid."""
++    t = np.linspace(lo, -lo, n)
++    X, Y, Z = np.meshgrid(t, t, t, indexing="ij")
++    p = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])
++    q = np.abs(p) - 1.0
++    d_box = np.linalg.norm(np.maximum(q, 0), axis=1) + np.minimum(q.max(axis=1), 0)
++    return np.maximum(d_box, 0.5 - np.hypot(p[:, 0], p[:, 1])).reshape(n, n, n), t[1] - t[0]
++
++
++def needle_mesh_triangles(n=11, lo=-1.25):
++    F, h = _field(n, lo)
++    eps = 1e-6 * h
++    small = np.abs(F) < eps
++    F[small] = np.where(F[small] < 0, -eps, eps)
++    nj, nk = F.shape[1], F.shape[2]
++    verts, vid, tris = [], {}, []
++
++    def gid(c):
++        return (c[0] * nj + c[1]) * nk + c[2]
++
++    def vert(a, b):
++        key = (min(gid(a), gid(b)), max(gid(a), gid(b)))
++        if key not in vid:
++            t = F[a] / (F[a] - F[b])
++            vid[key] = len(verts)
++            verts.append(lo + h * (np.array(a) + t * (np.array(b) - np.array(a))))
++        return vid[key]
++
++    def orient(tri, ins, outs):
++        pa, pb, pc = (verts[t] for t in tri)
++        nrm = np.cross(pb - pa, pc - pa)
++        q = [np.array(x, dtype=float) for x in ins + outs]
++        M = np.array([q[1] - q[0], q[2] - q[0], q[3] - q[0]])
++        rhs = np.array([F[tuple(int(v) for v in x)] - F[tuple(int(v) for v in q[0])] for x in q[1:]])
++        g = np.linalg.solve(M, rhs)
++        return tri if np.dot(nrm, g) >= 0 else [tri[0], tri[2], tri[1]]
++
++    for i in range(n - 1):
++        for j in range(n - 1):
++            for k in range(n - 1):
++                cube = F[i:i + 2, j:j + 2, k:k + 2]
++                if (cube < 0).all() or (cube >= 0).all():
++                    continue
++                cs = [(i + c[0], j + c[1], k + c[2]) for c in _CORNERS]
++                for tet in _TETS:
++                    p = [cs[t] for t in tet]
++                    inside = [F[c] < 0 for c in p]
++                    ins = [c for c, s in zip(p, inside) if s]
++                    outs = [c for c, s in zip(p, inside) if not s]
++                    if len(ins) in (0, 4):
++                        continue
++                    if len(ins) == 1:
++                        tris.append(orient([vert(ins[0], o) for o in outs], ins, outs))
++                    elif len(ins) == 3:
++                        tris.append(orient([vert(a, outs[0]) for a in ins], ins, outs))
++                    else:
++                        quad = [vert(ins[0], outs[0]), vert(ins[0], outs[1]), vert(ins[1], outs[1]),
++                                vert(ins[1], outs[0])]
++                        tris.append(orient([quad[0], quad[1], quad[2]], ins, outs))
++                        tris.append(orient([quad[0], quad[2], quad[3]], ins, outs))
++    return [tuple(tuple(float(v) for v in verts[t]) for t in tri) for tri in tris]
++
++
++def load_needle_mesh(n):
++    """Write the triangles as a binary STL and read it back (the path a user's file takes)."""
++    tris = needle_mesh_triangles(n)
++    fd, path = tempfile.mkstemp(suffix=".stl")
++    with os.fdopen(fd, "wb") as f:
++        f.write(b" " * 80)
++        f.write(struct.pack("<I", len(tris)))
++        for t in tris:
++            f.write(struct.pack("<12fH", 0.0, 0.0, 0.0, *t[0], *t[1], *t[2], 0))
++    try:
++        return Mesh.Mesh(path)
++    finally:
++        os.remove(path)
++
++
++class TestMeshFixDegenerations(unittest.TestCase):
++    def test_fix_degenerations_does_not_crash(self):
++        mesh = load_needle_mesh(11)
++        mesh.fixDegenerations(1e-9)  # crashes on FreeCAD 1.1.3
++        self.assertGreater(mesh.CountFacets, 0)
++        self.assertFalse(mesh.hasInvalidNeighbourhood())
++
++    def test_fix_degenerations_terminates(self):
++        mesh = load_needle_mesh(21)
++        mesh.fixDegenerations(1e-9)  # never returns on FreeCAD 1.1.3
++        self.assertGreater(mesh.CountFacets, 0)
++        self.assertFalse(mesh.hasInvalidNeighbourhood())
+diff --git a/src/Mod/Mesh/CMakeLists.txt b/src/Mod/Mesh/CMakeLists.txt
+index 5466304bf8..3edf072e08 100644
+--- a/src/Mod/Mesh/CMakeLists.txt
++++ b/src/Mod/Mesh/CMakeLists.txt
+@@ -10,6 +10,7 @@ set(Mesh_Scripts
+     BuildRegularGeoms.py
+     MeshEnums.py
+     App/MeshTestsApp.py
++    App/TestMeshFixDegenerations.py
+ )
+ 
+ set(MeshTestDataFiles
+diff --git a/src/Mod/Mesh/Init.py b/src/Mod/Mesh/Init.py
+index a28022c94b..caa963da8d 100644
+--- a/src/Mod/Mesh/Init.py
++++ b/src/Mod/Mesh/Init.py
+@@ -23,4 +23,4 @@ FreeCAD.addExportType("Additive Manufacturing Format (*.amf)", "Mesh")
+ FreeCAD.addExportType("Simple Model Format (*.smf)", "Mesh")
+ FreeCAD.addExportType("3D Manufacturing Format (*.3mf)", "Mesh")
+ 
+-FreeCAD.__unit_test__ += ["MeshTestsApp"]
++FreeCAD.__unit_test__ += ["MeshTestsApp", "TestMeshFixDegenerations"]

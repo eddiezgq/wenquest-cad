@@ -1,0 +1,65 @@
+diff --git a/src/Mod/Part/App/FeatureFillet.cpp b/src/Mod/Part/App/FeatureFillet.cpp
+index 0f9e680b8f..dd18ca8dd9 100644
+--- a/src/Mod/Part/App/FeatureFillet.cpp
++++ b/src/Mod/Part/App/FeatureFillet.cpp
+@@ -24,6 +24,7 @@
+ 
+ #include <FCConfig.h>
+ 
++#include <BRepCheck_Analyzer.hxx>
+ #include <BRepFilletAPI_MakeFillet.hxx>
+ #include <Precision.hxx>
+ #include <TopExp.hxx>
+@@ -117,6 +118,12 @@ App::DocumentObjectExecReturn* Fillet::execute()
+         if (shape.IsNull()) {
+             return new App::DocumentObjectExecReturn("Resulting shape is null");
+         }
++        if (!BRepCheck_Analyzer(shape).IsValid()) {
++            // see PartDesign::Fillet: the kernel can report success with an invalid solid
++            return new App::DocumentObjectExecReturn(
++                "Fillet result is not a valid solid. The radius may be too large for the selected edges."
++            );
++        }
+ 
+         TopoShape res(0);
+         this->Shape.setValue(res.makeElementShape(mkFillet, baseTopoShape, Part::OpCodes::Fillet));
+diff --git a/src/Mod/PartDesign/App/FeatureChamfer.cpp b/src/Mod/PartDesign/App/FeatureChamfer.cpp
+index fdec798ade..71712a4d0c 100644
+--- a/src/Mod/PartDesign/App/FeatureChamfer.cpp
++++ b/src/Mod/PartDesign/App/FeatureChamfer.cpp
+@@ -183,6 +183,15 @@ App::DocumentObjectExecReturn* Chamfer::execute()
+                 Precision::Confusion(),
+                 TopAbs_SHAPE
+             );
++            if (!BRepAlgo::IsValid(aLarg, shape.getShape(), Standard_False, Standard_False)) {
++                // The kernel may report success for a size the geometry cannot take (e.g. a radius
++                // larger than half the thinnest wall); the result is then an invalid solid whose
++                // volume can exceed the original. Do not store it.
++                return new App::DocumentObjectExecReturn(QT_TRANSLATE_NOOP(
++                    "Exception",
++                    "Chamfer result is not a valid solid. The size may be too large for the selected edges."
++                ));
++            }
+         }
+ 
+         // store shape before refinement
+diff --git a/src/Mod/PartDesign/App/FeatureFillet.cpp b/src/Mod/PartDesign/App/FeatureFillet.cpp
+index ade436be37..0d3f269990 100644
+--- a/src/Mod/PartDesign/App/FeatureFillet.cpp
++++ b/src/Mod/PartDesign/App/FeatureFillet.cpp
+@@ -131,6 +131,15 @@ App::DocumentObjectExecReturn* Fillet::execute()
+                 Precision::Confusion(),
+                 TopAbs_SHAPE
+             );
++            if (!BRepAlgo::IsValid(aLarg, shape.getShape(), Standard_False, Standard_False)) {
++                // The kernel may report success for a size the geometry cannot take (e.g. a radius
++                // larger than half the thinnest wall); the result is then an invalid solid whose
++                // volume can exceed the original. Do not store it.
++                return new App::DocumentObjectExecReturn(QT_TRANSLATE_NOOP(
++                    "Exception",
++                    "Fillet result is not a valid solid. The size may be too large for the selected edges."
++                ));
++            }
+         }
+ 
+         // store shape before refinement

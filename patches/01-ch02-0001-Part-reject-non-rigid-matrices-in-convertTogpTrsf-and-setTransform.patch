@@ -1,0 +1,44 @@
+diff --git a/src/Mod/Part/App/TopoShape.cpp b/src/Mod/Part/App/TopoShape.cpp
+index 6cf3bd98d8..b3b1f6ea5b 100644
+--- a/src/Mod/Part/App/TopoShape.cpp
++++ b/src/Mod/Part/App/TopoShape.cpp
+@@ -609,8 +609,22 @@ void TopoShape::setPyObject(PyObject* obj)
+ //     }
+ // }
+ 
++// Relative tolerance for telling a rigid or similarity matrix from one that only gp_GTrsf can hold.
++// Rounding in placements composed in double precision stays many orders of magnitude below it.
++static constexpr double MatrixScaleTolerance = 1e-6;
++
+ void TopoShape::convertTogpTrsf(const Base::Matrix4D& mtrx, gp_Trsf& trsf)
+ {
++    // gp_Trsf holds only rotations, mirrors and uniform scaling. gp_Trsf::SetValues() divides any
++    // other matrix by the cube root of its determinant and then orthogonalizes its columns: a
++    // non-uniform scaling becomes a uniform one and a shear is dropped, without an error.
++    auto type = mtrx.hasScale(MatrixScaleTolerance);
++    if (type != Base::ScaleType::NoScaling && type != Base::ScaleType::Uniform) {
++        throw Base::ValueError(
++            "Matrix with non-uniform scaling or shear cannot be applied as a placement; "
++            "use transformGeometry() or transformShape(matrix, copy, checkScale=True)"
++        );
++    }
+     trsf.SetValues(
+         mtrx[0][0],
+         mtrx[0][1],
+@@ -669,6 +683,16 @@ gp_Trsf TopoShape::convert(const Base::Matrix4D& mtrx)
+ 
+ void TopoShape::setTransform(const Base::Matrix4D& rclTrf)
+ {
++    // A location must be rigid: OCCT rejects a scaled or mirrored TopLoc_Location in
++    // TopoDS_Shape::Location(loc, true); set without the check, BRepCheck reports the shape
++    // invalid (scaling) or the solid turns inside out (mirror, negative volume).
++    if (rclTrf.hasScale(MatrixScaleTolerance) != Base::ScaleType::NoScaling
++        || rclTrf.determinant3() < 0.0) {
++        throw Base::ValueError(
++            "Shape placement matrix must be a rotation and translation; "
++            "use transformShape() or transformGeometry() to scale or mirror a shape"
++        );
++    }
+     gp_Trsf mov;
+     convertTogpTrsf(rclTrf, mov);
+     TopLoc_Location loc(mov);

@@ -1,0 +1,68 @@
+diff --git a/src/Mod/Part/App/TopoShapeFacePyImp.cpp b/src/Mod/Part/App/TopoShapeFacePyImp.cpp
+index ed9515ef12..3b9aa4e091 100644
+--- a/src/Mod/Part/App/TopoShapeFacePyImp.cpp
++++ b/src/Mod/Part/App/TopoShapeFacePyImp.cpp
+@@ -567,8 +567,61 @@ PyObject* TopoShapeFacePy::curvatureAt(PyObject* args) const
+         tuple.setItem(1, Py::Float(prop.MaxCurvature()));
+     }
+     else {
+-        PyErr_SetString(PartExceptionOCCError, "curvature not defined");
+-        return nullptr;
++        // At a parametric singularity (the pole of a sphere, the tip of a smooth dome) the
++        // parametrization degenerates but the surface may still be smooth. Approach the point
++        // along the whole collapsing parameter line from just inside the domain; if the normals
++        // and curvatures of all approaches agree, the singularity is removable and the limit is
++        // the curvature. Otherwise (e.g. the apex of a cone) it stays undefined.
++        const double u1 = adapt.FirstUParameter(), u2 = adapt.LastUParameter();
++        const double v1 = adapt.FirstVParameter(), v2 = adapt.LastVParameter();
++        BRepLProp_SLProps p1(adapt, u, v, 1, Precision::Confusion());
++        const bool sweepU = p1.D1U().Magnitude() <= p1.D1V().Magnitude();
++        const bool finite = !Precision::IsInfinite(u1) && !Precision::IsInfinite(u2)
++            && !Precision::IsInfinite(v1) && !Precision::IsInfinite(v2);
++        bool limitFound = false;
++        if (finite) {
++            const int n = 8;
++            double kmin = 0.0, kmax = 0.0, spreadK = 0.0, spreadN = 0.0;
++            gp_Dir n0;
++            int count = 0;
++            for (int i = 0; i < n; ++i) {
++                double uu = u, vv = v;
++                if (sweepU) {
++                    uu = u1 + (u2 - u1) * (i + 0.5) / n;
++                    vv = (v2 - v < v - v1) ? v - 1e-6 * (v2 - v1) : v + 1e-6 * (v2 - v1);
++                }
++                else {
++                    vv = v1 + (v2 - v1) * (i + 0.5) / n;
++                    uu = (u2 - u < u - u1) ? u - 1e-6 * (u2 - u1) : u + 1e-6 * (u2 - u1);
++                }
++                BRepLProp_SLProps q(adapt, uu, vv, 2, Precision::Confusion());
++                if (!q.IsNormalDefined() || !q.IsCurvatureDefined()) {
++                    count = 0;
++                    break;
++                }
++                if (count == 0) {
++                    n0 = q.Normal();
++                    kmin = q.MinCurvature();
++                    kmax = q.MaxCurvature();
++                }
++                else {
++                    spreadN = std::max(spreadN, n0.Angle(q.Normal()));
++                    spreadK = std::max(spreadK, std::max(std::abs(q.MinCurvature() - kmin),
++                                                         std::abs(q.MaxCurvature() - kmax)));
++                }
++                ++count;
++            }
++            const double scale = std::max({std::abs(kmin), std::abs(kmax), 1.0e-12});
++            if (count == n && spreadN < 1e-4 && spreadK < 1e-4 * scale) {
++                tuple.setItem(0, Py::Float(kmin));
++                tuple.setItem(1, Py::Float(kmax));
++                limitFound = true;
++            }
++        }
++        if (!limitFound) {
++            PyErr_SetString(PartExceptionOCCError, "curvature not defined");
++            return nullptr;
++        }
+     }
+ 
+     // BRepLProp_SLProps measures curvature against the normal of the underlying surface;

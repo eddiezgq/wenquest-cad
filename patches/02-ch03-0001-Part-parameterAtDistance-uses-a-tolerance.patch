@@ -1,0 +1,34 @@
+diff --git a/src/Mod/Part/App/Geom2d/Curve2dPyImp.cpp b/src/Mod/Part/App/Geom2d/Curve2dPyImp.cpp
+index 4559ebc501..c35f3d4459 100644
+--- a/src/Mod/Part/App/Geom2d/Curve2dPyImp.cpp
++++ b/src/Mod/Part/App/Geom2d/Curve2dPyImp.cpp
+@@ -554,7 +554,11 @@ PyObject* Curve2dPy::parameterAtDistance(PyObject* args)
+                 return nullptr;
+             }
+             Geom2dAdaptor_Curve adapt(c);
+-            GCPnts_AbscissaPoint abscissaPoint(adapt, abscissa, u);
++            // Without a tolerance GCPnts_AbscissaPoint integrates the arc length with one fixed-order
++            // Gauss rule over the whole parameter range (no error control): on an ellipse the point
++            // can be off by a large fraction of a millimetre. Use the same tolerance as
++            // Edge.getParameterByLength() and Curve.length().
++            GCPnts_AbscissaPoint abscissaPoint(Precision::Confusion(), adapt, abscissa, u);
+             double parm = abscissaPoint.Parameter();
+             return PyFloat_FromDouble(parm);
+         }
+diff --git a/src/Mod/Part/App/GeometryCurvePyImp.cpp b/src/Mod/Part/App/GeometryCurvePyImp.cpp
+index b3fa9ed8cf..ce485ac70d 100644
+--- a/src/Mod/Part/App/GeometryCurvePyImp.cpp
++++ b/src/Mod/Part/App/GeometryCurvePyImp.cpp
+@@ -405,7 +405,11 @@ PyObject* GeometryCurvePy::parameterAtDistance(PyObject* args) const
+                 return nullptr;
+             }
+             GeomAdaptor_Curve adapt(c);
+-            GCPnts_AbscissaPoint abscissaPoint(adapt, abscissa, u);
++            // Without a tolerance GCPnts_AbscissaPoint integrates the arc length with one fixed-order
++            // Gauss rule over the whole parameter range (no error control): on an ellipse the point
++            // can be off by a large fraction of a millimetre. Use the same tolerance as
++            // Edge.getParameterByLength() and Curve.length().
++            GCPnts_AbscissaPoint abscissaPoint(Precision::Confusion(), adapt, abscissa, u);
+             double parm = abscissaPoint.Parameter();
+             return PyFloat_FromDouble(parm);
+         }

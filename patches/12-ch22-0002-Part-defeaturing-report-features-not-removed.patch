@@ -1,0 +1,19 @@
+diff --git a/src/Mod/Part/App/TopoShape.cpp b/src/Mod/Part/App/TopoShape.cpp
+index b3b1f6ea5b..39e08f2376 100644
+--- a/src/Mod/Part/App/TopoShape.cpp
++++ b/src/Mod/Part/App/TopoShape.cpp
+@@ -4071,6 +4071,14 @@ TopoDS_Shape TopoShape::defeaturing(const std::vector<TopoDS_Shape>& s) const
+         const char* cstr2 = resultstr.c_str();
+         throw Base::RuntimeError(cstr2);
+     }
++    if (defeat.HasWarnings()) {
++        // A feature that cannot be removed is left in place and only reported as a warning;
++        // returning the shape as if it had been removed would hide that from the user.
++        Standard_SStream aSStream;
++        defeat.DumpWarnings(aSStream);
++        throw Base::RuntimeError("Defeaturing could not remove all requested faces: "
++                                 + aSStream.str());
++    }
+     return defeat.Shape();
+ }
+ 

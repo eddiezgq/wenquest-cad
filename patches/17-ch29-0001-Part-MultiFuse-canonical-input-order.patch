@@ -1,0 +1,66 @@
+diff --git a/src/Mod/Part/App/FeaturePartFuse.cpp b/src/Mod/Part/App/FeaturePartFuse.cpp
+index 232e2115ff..e0fbc9ff94 100644
+--- a/src/Mod/Part/App/FeaturePartFuse.cpp
++++ b/src/Mod/Part/App/FeaturePartFuse.cpp
+@@ -23,7 +23,14 @@
+  ***************************************************************************/
+ 
+ #include <Mod/Part/App/FCBRepAlgoAPI_Fuse.h>
++#include <algorithm>
++#include <array>
++#include <numeric>
++#include <BRepBndLib.hxx>
+ #include <BRepCheck_Analyzer.hxx>
++#include <BRepGProp.hxx>
++#include <Bnd_Box.hxx>
++#include <GProp_GProps.hxx>
+ #include <Standard_Failure.hxx>
+ #include <TopoDS_Iterator.hxx>
+ #include <TopExp.hxx>
+@@ -132,17 +139,37 @@ App::DocumentObjectExecReturn* MultiFuse::execute()
+             std::vector<ShapeHistory> history;
+             FCBRepAlgoAPI_Fuse mkFuse;
+             TopTools_ListOfShape shapeArguments, shapeTools;
+-            const TopoShape& shape = shapes.front();
+-            if (shape.isNull()) {
+-                throw Base::RuntimeError("Input shape is null");
+-            }
+-            shapeArguments.Append(shape.getShape());
+-
+-            for (auto it2 = shapes.begin() + 1; it2 != shapes.end(); ++it2) {
+-                if (it2->isNull()) {
++            for (const auto& s : shapes) {
++                if (s.isNull()) {
+                     throw Base::RuntimeError("Input shape is null");
+                 }
+-                shapeTools.Append(it2->getShape());
++            }
++            // The result of the general fuse depends (in the last bits of the geometry, and
++            // sometimes in the topology) on the order of its inputs, while a fusion is
++            // commutative. Feed OCCT the inputs in a canonical geometric order (bounding box,
++            // then volume) so that reordering the Shapes list does not change the result.
++            // The element map and the history below still use the user's order.
++            std::vector<std::array<double, 7>> keys;
++            for (const auto& s : shapes) {
++                Bnd_Box box;
++                BRepBndLib::Add(s.getShape(), box);
++                std::array<double, 7> k {};
++                if (!box.IsVoid()) {
++                    box.Get(k[0], k[1], k[2], k[3], k[4], k[5]);
++                }
++                GProp_GProps props;
++                BRepGProp::VolumeProperties(s.getShape(), props);
++                k[6] = props.Mass();
++                keys.push_back(k);
++            }
++            std::vector<std::size_t> order(shapes.size());
++            std::iota(order.begin(), order.end(), 0);
++            std::stable_sort(order.begin(), order.end(), [&keys](std::size_t a, std::size_t b) {
++                return keys[a] < keys[b];
++            });
++            shapeArguments.Append(shapes[order.front()].getShape());
++            for (auto it2 = order.begin() + 1; it2 != order.end(); ++it2) {
++                shapeTools.Append(shapes[*it2].getShape());
+             }
+ 
+             mkFuse.SetArguments(shapeArguments);

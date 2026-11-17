@@ -1,0 +1,168 @@
+diff --git a/src/Mod/Part/App/TopoShape.cpp b/src/Mod/Part/App/TopoShape.cpp
+index cf19bf2b1a..3990721deb 100644
+--- a/src/Mod/Part/App/TopoShape.cpp
++++ b/src/Mod/Part/App/TopoShape.cpp
+@@ -1601,17 +1601,32 @@ bool TopoShape::analyze(bool runBopCheck, std::ostream& str) const
+                 shapes.push_back(compsOfShape(i));
+             }
+ 
++            // BRepCheck records the statuses of a sub-shape per context: a shell's orientation
++            // is checked in the context of its solid, an edge's curve on surface in the context
++            // of each of its faces. The statuses a sub-shape has on its own can all be "no
++            // error" while the shape is invalid, so report every context of every sub-shape.
++            bool reported = false;
+             for (const auto& shape : shapes) {
+-                if (!aChecker.IsValid(shape)) {
+-                    const Handle(BRepCheck_Result) & result = aChecker.Result(shape);
+-                    if (result.IsNull()) {
+-                        continue;
+-                    }
+-                    const BRepCheck_ListOfStatus& status = result->StatusOnShape(shape);
+-
+-                    BRepCheck_ListIteratorOfListOfStatus it(status);
++                const Handle(BRepCheck_Result) & result = aChecker.Result(shape);
++                if (result.IsNull()) {
++                    continue;
++                }
++                for (result->InitContextIterator(); result->MoreShapeInContext();
++                     result->NextShapeInContext()) {
++                    BRepCheck_ListIteratorOfListOfStatus it(result->StatusOnShape());
+                     while (it.More()) {
+                         BRepCheck_Status& val = it.Value();
++                        if (val == BRepCheck_NoError) {
++                            it.Next();
++                            continue;
++                        }
++                        reported = true;
++                        str << shapeName(shape.ShapeType(), true);
++                        const TopoDS_Shape& context = result->ContextualShape();
++                        if (!context.IsSame(shape)) {
++                            str << " in " << shapeName(context.ShapeType(), true);
++                        }
++                        str << ": ";
+                         switch (val) {
+                             case BRepCheck_NoError:
+                                 str << "No error" << std::endl;
+@@ -1724,6 +1739,9 @@ bool TopoShape::analyze(bool runBopCheck, std::ostream& str) const
+                     }
+                 }
+             }
++            if (!reported) {
++                str << "Invalid shape (no BRepCheck status recorded)" << std::endl;
++            }
+ 
+             return false;  // errors detected
+         }
+diff --git a/src/Mod/Part/App/TopoShape.pyi b/src/Mod/Part/App/TopoShape.pyi
+index 49a781b354..eceaec8989 100644
+--- a/src/Mod/Part/App/TopoShape.pyi
++++ b/src/Mod/Part/App/TopoShape.pyi
+@@ -378,10 +378,12 @@ class TopoShape(ComplexGeoData):
+         """
+         ...
+ 
+-    def sewShape(self) -> None:
++    def sewShape(self, tolerance: float = 1.0e-06) -> None:
+         """
+         Sew the shape if there is a gap.
+-        sewShape()
++        sewShape([tolerance = 1e-6])
++        --
++        Faces whose boundaries are closer than tolerance are sewn together.
+         """
+         ...
+ 
+diff --git a/src/Mod/Part/App/TopoShapePyImp.cpp b/src/Mod/Part/App/TopoShapePyImp.cpp
+index 2515f9c914..3c749ec9b9 100644
+--- a/src/Mod/Part/App/TopoShapePyImp.cpp
++++ b/src/Mod/Part/App/TopoShapePyImp.cpp
+@@ -851,7 +851,7 @@ PyObject* TopoShapePy::sewShape(PyObject* args)
+     }
+ 
+     try {
+-        getTopoShapePtr()->sewShape();
++        getTopoShapePtr()->sewShape(tolerance);
+         Py_Return;
+     }
+     catch (Standard_Failure& e) {
+diff --git a/src/Mod/Part/CMakeLists.txt b/src/Mod/Part/CMakeLists.txt
+index 5a53670dc9..6240d4cc80 100644
+--- a/src/Mod/Part/CMakeLists.txt
++++ b/src/Mod/Part/CMakeLists.txt
+@@ -70,6 +70,7 @@ set(CompoundTools_Scripts
+ 
+ set(Part_tests
+     parttests/__init__.py
++    parttests/TestPartSewAndCheck.py
+     parttests/TestPartErrorMessages.py
+     parttests/TestBSplineSurfaceGrid.py
+     parttests/BRep_tests.py
+diff --git a/src/Mod/Part/TestPartApp.py b/src/Mod/Part/TestPartApp.py
+index a5bde29ebc..9b7fa0bcce 100644
+--- a/src/Mod/Part/TestPartApp.py
++++ b/src/Mod/Part/TestPartApp.py
+@@ -37,6 +37,7 @@ from parttests.TopoShapeListTest import TopoShapeListTest
+ from parttests.TopoShapeTest import TopoShapeTest
+ from parttests.shape_immutability_tests import ShapeImmutabilityTests
+ from parttests.TestPartMirror import TestPartMirroringRegression
++from parttests.TestPartSewAndCheck import TestPartSewAndCheck
+ from parttests.TestPartErrorMessages import TestPartErrorMessages
+ from parttests.TestBSplineSurfaceGrid import TestBSplineSurfaceGrid
+ from parttests.TestUndoMemSize import TestUndoMemSize
+diff --git a/src/Mod/Part/parttests/TestPartSewAndCheck.py b/src/Mod/Part/parttests/TestPartSewAndCheck.py
+new file mode 100644
+index 0000000000..18683b7bac
+--- /dev/null
++++ b/src/Mod/Part/parttests/TestPartSewAndCheck.py
+@@ -0,0 +1,51 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++"""Shape.sewShape(tolerance) must use the tolerance; Shape.check() must say what is wrong with an invalid shape."""
++
++import unittest
++
++import Part
++
++
++def box_faces_with_gaps(gap):
++    """The six faces of a 10 mm box, each moved outwards along its normal by gap (a gap of about gap at every edge)."""
++    box = Part.makeBox(10, 10, 10)
++    return [f.translated(f.normalAt(0, 0) * gap) for f in box.Faces]
++
++
++def box_with_one_face_reversed():
++    # Shell.add() keeps the faces as given (it sews an invalid shell but then stores the unsewn one);
++    # building it with Part.Shell(list) or replaceShape() gives a valid solid instead
++    box = Part.makeBox(10, 10, 10)
++    shell = Part.Shell()
++    for i, f in enumerate(box.Faces):
++        shell.add(f.reversed() if i == 0 else f)
++    return Part.Solid(shell)
++
++
++class TestPartSewAndCheck(unittest.TestCase):
++    def test_sew_shape_uses_the_given_tolerance(self):
++        # the tolerance was parsed and then ignored (sewShape() was called with its default 1e-6)
++        c = Part.Compound(box_faces_with_gaps(0.01))
++        c.sewShape(0.1)
++        self.assertEqual(len(c.Shells), 1)
++        self.assertTrue(c.Shells[0].isClosed())
++
++    def test_sew_shape_default_tolerance_does_not_close_large_gaps(self):
++        c = Part.Compound(box_faces_with_gaps(0.01))
++        c.sewShape()
++        self.assertFalse(any(s.isClosed() for s in c.Shells))
++
++    def test_check_names_the_bad_orientation(self):
++        # the status is recorded for the shell in the context of the solid; check() printed only
++        # the statuses each sub-shape has on its own and raised "No error"
++        s = box_with_one_face_reversed()
++        self.assertFalse(s.isValid())
++        with self.assertRaises(ValueError) as cm:
++            s.check()
++        msg = str(cm.exception)
++        self.assertNotIn("No error", msg)
++        self.assertIn("orientation", msg.lower())
++
++
++if __name__ == "__main__":
++    unittest.main()

@@ -1,0 +1,147 @@
+diff --git a/src/Mod/Part/App/OCCError.h b/src/Mod/Part/App/OCCError.h
+index af7839e9e2..bef49c66df 100644
+--- a/src/Mod/Part/App/OCCError.h
++++ b/src/Mod/Part/App/OCCError.h
+@@ -49,7 +49,7 @@ PartExport extern PyObject* PartExceptionOCCDimensionError;
+     { \
+         std::string str; \
+         Standard_CString msg = e.GetMessageString(); \
+-        str += typeid(e).name(); \
++        str += e.DynamicType()->Name(); /* typeid().name() is mangled on GCC/Clang */ \
+         str += " "; \
+         if (msg) { \
+             str += msg; \
+diff --git a/src/Mod/Part/App/TopoShapeExpansion.cpp b/src/Mod/Part/App/TopoShapeExpansion.cpp
+index 9016caaca8..a3b735a4f1 100644
+--- a/src/Mod/Part/App/TopoShapeExpansion.cpp
++++ b/src/Mod/Part/App/TopoShapeExpansion.cpp
+@@ -58,6 +58,7 @@
+ #include <BRepBuilderAPI_Transform.hxx>
+ #include <BRepFilletAPI_MakeChamfer.hxx>
+ #include <BRepFilletAPI_MakeFillet.hxx>
++#include <StdFail_NotDone.hxx>
+ #include <BRepLib.hxx>
+ #include <BRepOffsetAPI_DraftAngle.hxx>
+ #include <BRepOffsetAPI_MakeFilling.hxx>
+@@ -4096,7 +4097,7 @@ TopoShape& TopoShape::makeElementFillet(
+     }
+ 
+     if (edges.empty()) {
+-        FC_THROWM(NullShapeException, "Null input shape");
++        FC_THROWM(NullShapeException, "Fillet: no edges given");
+     }
+     BRepFilletAPI_MakeFillet mkFillet(shape.getShape());
+     for (auto& e : edges) {
+@@ -4109,6 +4110,18 @@ TopoShape& TopoShape::makeElementFillet(
+         }
+         mkFillet.Add(radius1, radius2, TopoDS::Edge(edge));
+     }
++    mkFillet.Build();
++    if (!mkFillet.IsDone()) {
++        // say what failed instead of OCCT's "BRep_API: command not done"
++        std::ostringstream msg;
++        msg << "Fillet failed: radius " << radius1;
++        if (radius2 != radius1) {
++            msg << " to " << radius2;
++        }
++        msg << " on " << edges.size() << " edge(s), " << mkFillet.NbFaultyContours()
++            << " contour(s) could not be filleted (is the radius larger than an adjacent face?)";
++        throw StdFail_NotDone(msg.str().c_str());
++    }
+     return makeElementShape(mkFillet, shape, op);
+ }
+ 
+@@ -4129,7 +4142,7 @@ TopoShape& TopoShape::makeElementChamfer(
+         FC_THROWM(NullShapeException, "Null shape");
+     }
+     if (edges.empty()) {
+-        FC_THROWM(NullShapeException, "Null input shape");
++        FC_THROWM(NullShapeException, "Chamfer: no edges given");
+     }
+     BRepFilletAPI_MakeChamfer mkChamfer(shape.getShape());
+     for (auto& e : edges) {
+@@ -4161,6 +4174,13 @@ TopoShape& TopoShape::makeElementChamfer(
+                 break;
+         }
+     }
++    mkChamfer.Build();
++    if (!mkChamfer.IsDone()) {
++        std::ostringstream msg;
++        msg << "Chamfer failed: size " << radius1 << " on " << edges.size()
++            << " edge(s) (is the size larger than an adjacent face?)";
++        throw StdFail_NotDone(msg.str().c_str());
++    }
+     return makeElementShape(mkChamfer, shape, op);
+ }
+ 
+diff --git a/src/Mod/Part/CMakeLists.txt b/src/Mod/Part/CMakeLists.txt
+index a7f12e1bae..5a53670dc9 100644
+--- a/src/Mod/Part/CMakeLists.txt
++++ b/src/Mod/Part/CMakeLists.txt
+@@ -70,6 +70,7 @@ set(CompoundTools_Scripts
+ 
+ set(Part_tests
+     parttests/__init__.py
++    parttests/TestPartErrorMessages.py
+     parttests/TestBSplineSurfaceGrid.py
+     parttests/BRep_tests.py
+     parttests/Geom2d_tests.py
+diff --git a/src/Mod/Part/TestPartApp.py b/src/Mod/Part/TestPartApp.py
+index 52b175de7f..a5bde29ebc 100644
+--- a/src/Mod/Part/TestPartApp.py
++++ b/src/Mod/Part/TestPartApp.py
+@@ -37,6 +37,7 @@ from parttests.TopoShapeListTest import TopoShapeListTest
+ from parttests.TopoShapeTest import TopoShapeTest
+ from parttests.shape_immutability_tests import ShapeImmutabilityTests
+ from parttests.TestPartMirror import TestPartMirroringRegression
++from parttests.TestPartErrorMessages import TestPartErrorMessages
+ from parttests.TestBSplineSurfaceGrid import TestBSplineSurfaceGrid
+ from parttests.TestUndoMemSize import TestUndoMemSize
+ from parttests.book_regression_tests import BookRegressionTests
+diff --git a/src/Mod/Part/parttests/TestPartErrorMessages.py b/src/Mod/Part/parttests/TestPartErrorMessages.py
+new file mode 100644
+index 0000000000..173eb23593
+--- /dev/null
++++ b/src/Mod/Part/parttests/TestPartErrorMessages.py
+@@ -0,0 +1,41 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++"""Error messages of Part operations should name the cause (for users and for scripts that repair themselves)."""
++
++import unittest
++
++import Part
++
++
++class TestPartErrorMessages(unittest.TestCase):
++    def setUp(self):
++        self.box = Part.makeBox(60, 40, 20)
++
++    def test_occ_error_names_the_exception_class(self):
++        # typeid().name() gave a compiler-mangled prefix such as "15StdFail_NotDone"
++        with self.assertRaises(Part.OCCError) as cm:
++            self.box.makeFillet(30, self.box.Edges)
++        self.assertTrue(str(cm.exception).startswith("StdFail_NotDone"), str(cm.exception))
++
++    def test_fillet_failure_gives_the_radius(self):
++        with self.assertRaises(Part.OCCError) as cm:
++            self.box.makeFillet(25, self.box.Edges[:4])
++        self.assertIn("radius 25", str(cm.exception))
++
++    def test_chamfer_failure_gives_the_size(self):
++        with self.assertRaises(Part.OCCError) as cm:
++            self.box.makeChamfer(25, self.box.Edges[:4])
++        self.assertIn("size 25", str(cm.exception))
++
++    def test_fillet_without_edges_says_so(self):
++        with self.assertRaises(Exception) as cm:
++            self.box.makeFillet(1, [])
++        self.assertIn("no edges", str(cm.exception))
++
++    def test_chamfer_without_edges_says_so(self):
++        with self.assertRaises(Exception) as cm:
++            self.box.makeChamfer(1, [])
++        self.assertIn("no edges", str(cm.exception))
++
++
++if __name__ == "__main__":
++    unittest.main()

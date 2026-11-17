@@ -1,0 +1,173 @@
+diff --git a/src/App/Document.cpp b/src/App/Document.cpp
+index 0c7949171e..b34971d2eb 100644
+--- a/src/App/Document.cpp
++++ b/src/App/Document.cpp
+@@ -701,7 +701,16 @@ int Document::getUndoMode() const
+ 
+ unsigned int Document::getUndoMemSize() const
+ {
+-    return d->UndoMemSize;
++    // Memory held by the undo and redo stacks. (d->UndoMemSize is the limit set by
++    // setUndoLimit(), not the current size.)
++    unsigned int size = 0;
++    for (const auto* t : mUndoTransactions) {
++        size += t->getMemSize();
++    }
++    for (const auto* t : mRedoTransactions) {
++        size += t->getMemSize();
++    }
++    return size;
+ }
+ 
+ void Document::setUndoLimit(const unsigned int UndoMemSize) // NOLINT
+diff --git a/src/App/Transactions.cpp b/src/App/Transactions.cpp
+index a4493d7b88..fabdf29794 100644
+--- a/src/App/Transactions.cpp
++++ b/src/App/Transactions.cpp
+@@ -107,7 +107,13 @@ int Transaction::getLastID()
+ 
+ unsigned int Transaction::getMemSize() const
+ {
+-    return 0;
++    // Memory held by this transaction: the saved values of the changed properties
++    // (objects kept alive by the transaction itself are not counted).
++    unsigned int size = 0;
++    for (const auto& info : _Objects) {
++        size += info.second->getMemSize();
++    }
++    return size;
+ }
+ 
+ void Transaction::Save(Base::Writer& /*writer*/) const
+@@ -448,7 +454,13 @@ void TransactionObject::addOrRemoveProperty(const Property* pcProp, bool add)
+ 
+ unsigned int TransactionObject::getMemSize() const
+ {
+-    return 0;
++    unsigned int size = 0;
++    for (const auto& v : _PropChangeMap) {
++        if (v.second.property) {
++            size += v.second.property->getMemSize();
++        }
++    }
++    return size;
+ }
+ 
+ void TransactionObject::Save(Base::Writer& /*writer*/) const
+diff --git a/src/Mod/Part/App/TopoShape.cpp b/src/Mod/Part/App/TopoShape.cpp
+index e056239509..cf19bf2b1a 100644
+--- a/src/Mod/Part/App/TopoShape.cpp
++++ b/src/Mod/Part/App/TopoShape.cpp
+@@ -36,6 +36,8 @@
+ #include <Bnd_Box.hxx>
+ #include <BRep_Builder.hxx>
+ #include <BRep_Tool.hxx>
++#include <Poly_Triangulation.hxx>
++#include <TopLoc_Location.hxx>
+ #include <BRepAdaptor_Surface.hxx>
+ #include <Mod/Part/App/FCBRepAlgoAPI_Common.h>
+ #include <BRepAdaptor_CompCurve.hxx>
+@@ -1357,6 +1359,20 @@ unsigned int TopoShape::getMemSize() const
+                     // first, last, tolerance
+                     memsize += 5 * sizeof(Standard_Real);
+                     const TopoDS_Face& face = TopoDS::Face(shape);
++                    // the triangulation stored on the face (often far larger than the geometry)
++                    TopLoc_Location loc;
++                    const Handle(Poly_Triangulation)& tria = BRep_Tool::Triangulation(face, loc);
++                    if (!tria.IsNull()) {
++                        size_t perNode = sizeof(gp_Pnt);
++                        if (tria->HasUVNodes()) {
++                            perNode += sizeof(gp_Pnt2d);
++                        }
++                        if (tria->HasNormals()) {
++                            perNode += 3 * sizeof(Standard_ShortReal);
++                        }
++                        memsize += sizeof(Poly_Triangulation) + tria->NbNodes() * perNode
++                            + tria->NbTriangles() * sizeof(Poly_Triangle);
++                    }
+                     // if no geometry is attached to a face an exception is raised
+                     BRepAdaptor_Surface surface;
+                     try {
+diff --git a/src/Mod/Part/CMakeLists.txt b/src/Mod/Part/CMakeLists.txt
+index 09e34eea59..eee37c308b 100644
+--- a/src/Mod/Part/CMakeLists.txt
++++ b/src/Mod/Part/CMakeLists.txt
+@@ -81,6 +81,7 @@ set(Part_tests
+     parttests/book_regression_tests.py
+     parttests/TestTangentMode3-0.21.FCStd
+     parttests/TestPartMirror.py
++    parttests/TestUndoMemSize.py
+     parttests/shape_immutability_tests.py
+ )
+ 
+diff --git a/src/Mod/Part/TestPartApp.py b/src/Mod/Part/TestPartApp.py
+index 440867f2c5..a2e347921a 100644
+--- a/src/Mod/Part/TestPartApp.py
++++ b/src/Mod/Part/TestPartApp.py
+@@ -37,6 +37,7 @@ from parttests.TopoShapeListTest import TopoShapeListTest
+ from parttests.TopoShapeTest import TopoShapeTest
+ from parttests.shape_immutability_tests import ShapeImmutabilityTests
+ from parttests.TestPartMirror import TestPartMirroringRegression
++from parttests.TestUndoMemSize import TestUndoMemSize
+ from parttests.book_regression_tests import BookRegressionTests
+ 
+ 
+diff --git a/src/Mod/Part/parttests/TestUndoMemSize.py b/src/Mod/Part/parttests/TestUndoMemSize.py
+new file mode 100644
+index 0000000000..b0ada707ff
+--- /dev/null
++++ b/src/Mod/Part/parttests/TestUndoMemSize.py
+@@ -0,0 +1,53 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++"""Memory accounting of shapes and of the undo stack
++("FreeCAD kernel: decode, verify, correct", chapter 35)."""
++import unittest
++
++import FreeCAD as App
++import Part
++
++
++def meshed_sphere(r):
++    s = Part.makeSphere(r)
++    s.tessellate(0.01)
++    return s
++
++
++class TestUndoMemSize(unittest.TestCase):
++    def setUp(self):
++        self.doc = App.newDocument("TestUndoMemSize")
++        self.doc.UndoMode = 1
++
++    def tearDown(self):
++        App.closeDocument(self.doc.Name)
++
++    def test_shape_mem_size_counts_triangulation(self):
++        plain = Part.makeSphere(10)
++        before = plain.MemSize
++        plain.tessellate(0.01)
++        self.assertGreater(plain.MemSize, before)
++
++    def test_undo_redo_mem_size_grows_with_transactions(self):
++        f = self.doc.addObject("Part::Feature", "F")
++        sizes = []
++        for k in range(3):
++            self.doc.openTransaction(f"t{k}")
++            f.Shape = meshed_sphere(10 + k)
++            self.doc.commitTransaction()
++            sizes.append(self.doc.UndoRedoMemSize)
++        self.assertGreater(sizes[0], 0)
++        self.assertLess(sizes[0], sizes[-1])
++        self.doc.clearUndos()
++        self.assertEqual(self.doc.UndoRedoMemSize, 0)
++
++    def test_document_mem_size_includes_undo(self):
++        f = self.doc.addObject("Part::Feature", "F")
++        self.doc.openTransaction("t")
++        f.Shape = meshed_sphere(10)
++        self.doc.commitTransaction()
++        self.doc.openTransaction("t2")
++        f.Shape = meshed_sphere(11)
++        self.doc.commitTransaction()
++        with_undo = self.doc.MemSize
++        self.doc.clearUndos()
++        self.assertGreater(with_undo, self.doc.MemSize)

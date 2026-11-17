@@ -1,0 +1,43 @@
+diff --git a/src/Mod/Part/App/TopoShapeFace.pyi b/src/Mod/Part/App/TopoShapeFace.pyi
+index 2794ba48ca..d91dde8a7d 100644
+--- a/src/Mod/Part/App/TopoShapeFace.pyi
++++ b/src/Mod/Part/App/TopoShapeFace.pyi
+@@ -171,10 +171,13 @@ class TopoShapeFace(TopoShape):
+         ...
+ 
+     @constmethod
+-    def curvatureAt(self, u: float, v: float) -> float:
++    def curvatureAt(self, u: float, v: float) -> Tuple[float, float]:
+         """
+-        Get the curvature at the given parameter [0|Length] if defined
+-        curvatureAt(u,v) -> Float
++        Get the principal curvatures (min, max) at the given parameter if defined.
++        The sign is taken against the face normal returned by normalAt(u,v): positive where the
++        face bends towards that normal (for a solid, its outward normal), so a convex boss is
++        negative and a hole of the same radius positive.
++        curvatureAt(u,v) -> (Float, Float)
+         """
+         ...
+ 
+diff --git a/src/Mod/Part/App/TopoShapeFacePyImp.cpp b/src/Mod/Part/App/TopoShapeFacePyImp.cpp
+index f3c9475366..ed9515ef12 100644
+--- a/src/Mod/Part/App/TopoShapeFacePyImp.cpp
++++ b/src/Mod/Part/App/TopoShapeFacePyImp.cpp
+@@ -571,6 +571,17 @@ PyObject* TopoShapeFacePy::curvatureAt(PyObject* args) const
+         return nullptr;
+     }
+ 
++    // BRepLProp_SLProps measures curvature against the normal of the underlying surface;
++    // normalAt() returns the normal of the face, reversed for a reversed face. Give the
++    // curvatures against the same normal, so that a hole and a boss of the same radius differ
++    // in sign. Reversing the normal negates both curvatures and swaps min and max.
++    if (f.Orientation() == TopAbs_REVERSED) {
++        double kmin = static_cast<double>(Py::Float(tuple.getItem(0)));
++        double kmax = static_cast<double>(Py::Float(tuple.getItem(1)));
++        tuple.setItem(0, Py::Float(-kmax));
++        tuple.setItem(1, Py::Float(-kmin));
++    }
++
+     return Py::new_reference_to(tuple);
+ }
+ 

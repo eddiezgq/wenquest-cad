@@ -1,0 +1,121 @@
+diff --git a/src/Mod/Part/Gui/TaskCheckGeometry.cpp b/src/Mod/Part/Gui/TaskCheckGeometry.cpp
+index 52a77c5c33..5b550c9aff 100644
+--- a/src/Mod/Part/Gui/TaskCheckGeometry.cpp
++++ b/src/Mod/Part/Gui/TaskCheckGeometry.cpp
+@@ -40,6 +40,15 @@
+ #include <BRepCheck_Analyzer.hxx>
+ #include <BRepCheck_ListIteratorOfListOfStatus.hxx>
+ #include <BRepCheck_Result.hxx>
++#include <BRepAdaptor_Curve.hxx>
++#include <BRepAdaptor_Surface.hxx>
++#include <BRep_Tool.hxx>
++#include <GeomAbs_SurfaceType.hxx>
++#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
++#include <gp_Lin.hxx>
++#include <gp_Pln.hxx>
++#include <Precision.hxx>
+ #include <BRepTools_ShapeSet.hxx>
+ #include <ShapeAnalysis_FreeBounds.hxx>
+ #include <TopoDS.hxx>
+@@ -537,6 +546,11 @@ void TaskCheckGeometryResults::goCheck()
+             continue;  // don't run BOPAlgo_ArgumentAnalyzer if BRepCheck_Analyzer finds something.
+         }
+         else {
++            // A planar edge whose two faces meet outside the edge's tolerance tube passes
++            // BRepCheck and the BOP check, yet no solid may realize the model (sewn sliver
++            // faces at a sharp edge). Report it as a warning; it is cheap to compute.
++            localInvalidShapeCount += goPlanarEdgeCheck(shape, theRoot, baseName);
++
+             // BOPAlgo_ArgumentAnalyzer can be really slow!
+             // so only run it when the shape seems valid to BRepCheck_Analyzer And
+             // when the option is set.
+@@ -594,6 +608,75 @@ void TaskCheckGeometryResults::goCheck()
+     message->setText(aMessage);
+ }
+ 
++int TaskCheckGeometryResults::goPlanarEdgeCheck(
++    const TopoDS_Shape& shape,
++    ResultEntry* theRoot,
++    const QString& baseName
++)
++{
++    // For every edge shared by exactly two planar, non-parallel faces: the line where the two
++    // planes meet should run inside the tube of radius = edge tolerance around the edge. If at
++    // every sample of the edge the line is farther than the tolerance, the faces cross outside
++    // the region the tolerance allows, and the model may have no realization as a solid.
++    TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
++    TopExp::MapShapesAndUniqueAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
++    int found = 0;
++    for (int i = 1; i <= edgeFaces.Extent(); ++i) {
++        const TopoDS_Edge& edge = TopoDS::Edge(edgeFaces.FindKey(i));
++        const TopTools_ListOfShape& faces = edgeFaces.FindFromIndex(i);
++        if (BRep_Tool::Degenerated(edge) || faces.Extent() != 2) {
++            continue;
++        }
++        BRepAdaptor_Surface s1(TopoDS::Face(faces.First()));
++        BRepAdaptor_Surface s2(TopoDS::Face(faces.Last()));
++        if (s1.GetType() != GeomAbs_Plane || s2.GetType() != GeomAbs_Plane) {
++            continue;
++        }
++        gp_Pln p1 = s1.Plane();
++        gp_Pln p2 = s2.Plane();
++        gp_Vec n1(p1.Axis().Direction());
++        gp_Vec n2(p2.Axis().Direction());
++        gp_Vec dir = n1.Crossed(n2);
++        if (dir.Magnitude() < 1e-12) {
++            continue;
++        }
++        // the point of the line nearest the origin: x = (d1 (n2 x dir) + d2 (dir x n1)) / |dir|^2
++        double d1 = n1.Dot(gp_Vec(p1.Location().XYZ()));
++        double d2 = n2.Dot(gp_Vec(p2.Location().XYZ()));
++        gp_Vec x0 = (n2.Crossed(dir) * d1 + dir.Crossed(n1) * d2) / dir.SquareMagnitude();
++        gp_Lin line(gp_Pnt(x0.XYZ()), gp_Dir(dir));
++        double tol = BRep_Tool::Tolerance(edge);
++        BRepAdaptor_Curve curve(edge);
++        double first = curve.FirstParameter();
++        double last = curve.LastParameter();
++        double dmin = Precision::Infinite();
++        const int samples = 41;
++        for (int k = 0; k < samples; ++k) {
++            double t = first + (last - first) * k / (samples - 1);
++            dmin = std::min(dmin, line.Distance(curve.Value(t)));
++        }
++        if (dmin <= tol) {
++            continue;
++        }
++        ++found;
++        ResultEntry* entry = new ResultEntry();
++        entry->parent = theRoot;
++        entry->shape = edge;
++        entry->name = baseName;
++        entry->type = shapeEnumToString(TopAbs_EDGE);
++        entry->error = tr("Warning: planar faces meet outside edge tolerance (%1 x tolerance)")
++                           .arg(dmin / tol, 0, 'g', 3);
++        reportViewStrings.append(
++            entry->name + QLatin1String(" | ") + entry->type + QLatin1String(" | ") + entry->error
++        );
++        entry->viewProviderRoot = currentSeparator;
++        entry->viewProviderRoot->ref();
++        goSetupResultBoundingBox(entry);
++        theRoot->children.push_back(entry);
++    }
++    return found;
++}
++
+ void TaskCheckGeometryResults::generateReport()
+ {
+     QString reportString = reportViewStrings.join(QLatin1String("\n"));
+diff --git a/src/Mod/Part/Gui/TaskCheckGeometry.h b/src/Mod/Part/Gui/TaskCheckGeometry.h
+index 01fec0a8a9..3c0aafd8c0 100644
+--- a/src/Mod/Part/Gui/TaskCheckGeometry.h
++++ b/src/Mod/Part/Gui/TaskCheckGeometry.h
+@@ -142,6 +142,8 @@ private:
+         const Message_ProgressScope& theScope
+     );
+ 
++    int goPlanarEdgeCheck(const TopoDS_Shape& shape, ResultEntry* theRoot, const QString& baseName);
++
+     void buildShapeContent(
+         App::DocumentObject* pObject,
+         const QString& baseName,

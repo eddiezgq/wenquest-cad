@@ -1,0 +1,62 @@
+diff --git a/src/Mod/MeshPart/Gui/MeshFlatteningCommand.py b/src/Mod/MeshPart/Gui/MeshFlatteningCommand.py
+index 46d1e14b2b..f7d88c08cd 100644
+--- a/src/Mod/MeshPart/Gui/MeshFlatteningCommand.py
++++ b/src/Mod/MeshPart/Gui/MeshFlatteningCommand.py
+@@ -31,6 +31,23 @@ import MeshPartGui
+ from PySide.QtCore import QT_TRANSLATE_NOOP  # for translations
+ 
+ 
++# A flattening is exact only for a developable surface. The flattener scales its result to the
++# area of the 3D mesh, so the areas always agree; report how much the edge lengths changed.
++DISTORTION_WARNING = 0.01
++
++
++def report_distortion(flattener, what):
++    d = flattener.getDistortion()
++    text = "{}: edge lengths changed by up to {:.3%} (rms {:.3%}), {} flipped triangles\n".format(
++        what, d["max_edge_strain"], d["rms_edge_strain"], d["flipped_triangles"]
++    )
++    if d["max_edge_strain"] > DISTORTION_WARNING or d["flipped_triangles"] > 0:
++        App.Console.PrintWarning(text)
++    else:
++        App.Console.PrintMessage(text)
++    return d
++
++
+ class BaseCommand(object):
+     def __init__(self):
+         pass
+@@ -65,6 +82,7 @@ class CreateFlatMesh(BaseCommand):
+         faces = np.array([list(i) for i in obj.Mesh.Topology[1]])
+         flattener = flatmesh.FaceUnwrapper(points, faces)
+         flattener.findFlatNodes(5, 0.95)
++        report_distortion(flattener, "Unwrap Mesh")
+         boundaries = flattener.getFlatBoundaryNodes()
+         # print('number of nodes: {}'.format(len(flattener.ze_nodes)))
+         # print('number of faces: {}'.format(len(flattener.tris)))
+@@ -103,11 +121,24 @@ class CreateFlatFace(BaseCommand):
+         nurbs = face.Surface
+         nurbs.setUNotPeriodic()
+         nurbs.setVNotPeriodic()
+-        bs = nurbs.toBSpline(1, "C0", "C0", 3, 3, 10)
++        # The flat face is interpolated on the poles of this approximation, so its tolerance
++        # bounds the result: a fixed 1 mm with at most 10 segments shortened the edges of an
++        # unwrapped cylinder face (R 10 mm) by 2 %. Use a tolerance relative to the face.
++        tol = 1e-3 * face.BoundBox.DiagonalLength
++        bs = None
++        for _ in range(4):
++            try:
++                bs = nurbs.toBSpline(tol, "C0", "C0", 3, 3, 50)
++                break
++            except Part.OCCError:
++                tol *= 10
++        if bs is None:
++            raise RuntimeError("Unwrap Face: cannot approximate the face by a B-spline surface")
+         face = bs.toShape()
+         face.tessellate(0.01)
+         flattener = flatmesh.FaceUnwrapper(face)
+         flattener.findFlatNodes(5, 0.99)
++        report_distortion(flattener, "Unwrap Face")
+         poles = flattener.interpolateFlatFace(face)
+         num_u_poles = len(bs.getPoles())
+         num_v_poles = len(bs.getPoles()[0])

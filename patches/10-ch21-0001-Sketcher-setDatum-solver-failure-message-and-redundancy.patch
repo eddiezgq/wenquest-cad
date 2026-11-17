@@ -1,0 +1,35 @@
+diff --git a/src/Mod/Sketcher/App/SketchObject.cpp b/src/Mod/Sketcher/App/SketchObject.cpp
+index 4494833d2e..9dfa1aaf9d 100644
+--- a/src/Mod/Sketcher/App/SketchObject.cpp
++++ b/src/Mod/Sketcher/App/SketchObject.cpp
+@@ -884,6 +884,15 @@ int SketchObject::setDatum(int ConstrId, double Datum)
+ 
+     int err = solve();
+ 
++    // A redundant (but consistent) constraint elsewhere in the sketch does not make the new value
++    // wrong: keep the value. Redundancy is still reported through RedundantConstraints.
++    if (err == -2)
++        err = 0;
++    // -1 from solve() means "the solver found no solution"; give it its own code so that callers
++    // can tell it from "invalid constraint index" (also -1 above).
++    if (err == -1)
++        err = -7;
++
+     if (err)
+         this->Constraints.getValues()[ConstrId]->setValue(oldDatum);// newVals is a shell now
+ 
+diff --git a/src/Mod/Sketcher/App/SketchObjectPyImp.cpp b/src/Mod/Sketcher/App/SketchObjectPyImp.cpp
+index dc13efb624..6e893d951f 100644
+--- a/src/Mod/Sketcher/App/SketchObjectPyImp.cpp
++++ b/src/Mod/Sketcher/App/SketchObjectPyImp.cpp
+@@ -837,6 +837,10 @@ PyObject* SketchObjectPy::setDatum(PyObject* args)
+         else if (err == -6) {
+             str << "Cannot set the datum because of invalid geometry";
+         }
++        else if (err == -7) {
++            str << "No solution was found with datum " << Quantity.getUserString()
++                << " for the constraint with index " << Index;
++        }
+         else {
+             str << "Unexpected problem at setting datum " << Quantity.getUserString()
+                 << " for the constraint with index " << Index;

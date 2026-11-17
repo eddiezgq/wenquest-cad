@@ -1,0 +1,215 @@
+diff --git a/src/Mod/Part/App/FeatureOffset.cpp b/src/Mod/Part/App/FeatureOffset.cpp
+index 428a7605b7..b6634b9e4a 100644
+--- a/src/Mod/Part/App/FeatureOffset.cpp
++++ b/src/Mod/Part/App/FeatureOffset.cpp
+@@ -22,7 +22,17 @@
+  *                                                                         *
+  ***************************************************************************/
+ 
++#include <cmath>
++
++#include <BRepAdaptor_Surface.hxx>
++#include <BRepLProp_SLProps.hxx>
+ #include <Precision.hxx>
++#include <TopExp_Explorer.hxx>
++#include <TopoDS.hxx>
++#include <TopoDS_Face.hxx>
++#include <gp_Cylinder.hxx>
++#include <gp_Sphere.hxx>
++#include <gp_Torus.hxx>
+ 
+ 
+ #include <App/Link.h>
+@@ -81,6 +91,64 @@ short Offset::mustExecute() const
+     return 0;
+ }
+ 
++bool Part::offsetCollapsesCurvedFace(const TopoDS_Shape& shape, double offset, double& radius)
++{
++    for (TopExp_Explorer xp(shape, TopAbs_FACE); xp.More(); xp.Next()) {
++        const TopoDS_Face& face = TopoDS::Face(xp.Current());
++        BRepAdaptor_Surface surf(face);
++        double u = 0.5 * (surf.FirstUParameter() + surf.LastUParameter());
++        double v = 0.5 * (surf.FirstVParameter() + surf.LastVParameter());
++        BRepLProp_SLProps props(surf, u, v, 1, Precision::Confusion());
++        if (!props.IsNormalDefined()) {
++            continue;
++        }
++        gp_Dir normal = props.Normal();
++        if (face.Orientation() == TopAbs_REVERSED) {
++            normal.Reverse();
++        }
++        double rho = 0.0;
++        gp_Vec radial;
++        switch (surf.GetType()) {
++            case GeomAbs_Cylinder: {
++                gp_Cylinder cyl = surf.Cylinder();
++                gp_Vec w(cyl.Location(), props.Value());
++                gp_Vec axis(cyl.Axis().Direction());
++                radial = w - axis * w.Dot(axis);
++                rho = cyl.Radius();
++                break;
++            }
++            case GeomAbs_Sphere: {
++                gp_Sphere sph = surf.Sphere();
++                radial = gp_Vec(sph.Location(), props.Value());
++                rho = sph.Radius();
++                break;
++            }
++            case GeomAbs_Torus: {
++                gp_Torus tor = surf.Torus();
++                gp_Vec w(tor.Location(), props.Value());
++                gp_Vec axis(tor.Axis().Direction());
++                gp_Vec inPlane = w - axis * w.Dot(axis);
++                if (inPlane.Magnitude() < Precision::Confusion()) {
++                    continue;
++                }
++                gp_Pnt tube = tor.Location().Translated(inPlane.Normalized() * tor.MajorRadius());
++                radial = gp_Vec(tube, props.Value());
++                rho = tor.MinorRadius();
++                break;
++            }
++            default:
++                continue;
++        }
++        bool convex = radial.Dot(gp_Vec(normal)) > 0.0;
++        bool shrinks = (offset < 0.0 && convex) || (offset > 0.0 && !convex);
++        if (shrinks && std::fabs(offset) >= rho - Precision::Confusion()) {
++            radius = rho;
++            return true;
++        }
++    }
++    return false;
++}
++
+ App::DocumentObjectExecReturn* Offset::execute()
+ {
+     App::DocumentObject* source = Source.getValue();
+@@ -98,7 +166,14 @@ App::DocumentObjectExecReturn* Offset::execute()
+         return new App::DocumentObjectExecReturn("Invalid source link");
+     }
+     auto join = static_cast<JoinType>(Join.getValue());
+-    this->Shape.setValue(TopoShape(0).makeElementOffset(
++    double radius = 0.0;
++    if (mode == 0 && offsetCollapsesCurvedFace(shape.getShape(), offset, radius)) {
++        return new App::DocumentObjectExecReturn(
++            "The offset reaches the radius of a curved face; that face would have to disappear, "
++            "which the offset algorithm does not do. Use a smaller offset."
++        );
++    }
++    TopoShape result = TopoShape(0).makeElementOffset(
+         shape,
+         offset,
+         tol,
+@@ -107,7 +182,11 @@ App::DocumentObjectExecReturn* Offset::execute()
+         mode,
+         join,
+         fill ? FillType::fill : FillType::noFill
+-    ));
++    );
++    if (!result.isNull() && !result.isValid()) {
++        return new App::DocumentObjectExecReturn("Offset result is not a valid shape");
++    }
++    this->Shape.setValue(result);
+     return App::DocumentObject::StdReturn;
+ }
+ 
+diff --git a/src/Mod/Part/App/FeatureOffset.h b/src/Mod/Part/App/FeatureOffset.h
+index d9138bc282..ff205613e2 100644
+--- a/src/Mod/Part/App/FeatureOffset.h
++++ b/src/Mod/Part/App/FeatureOffset.h
+@@ -87,5 +87,12 @@ public:
+     //@}
+ };
+ 
++/// True when offsetting the faces of \a shape by \a offset (negative = towards the material) would
++/// shrink a convex cylinder, sphere or torus tube (or, for a positive offset, a concave one) to zero
++/// or negative radius. Such a face must disappear from the true offset, a topology change that the
++/// face-by-face offset algorithm does not make; its result is then wrong even when it passes the
++/// shape check. \a radius receives the radius of the first such face.
++PartExport bool offsetCollapsesCurvedFace(const TopoDS_Shape& shape, double offset, double& radius);
++
+ }  // namespace Part
+ #endif  // PART_FEATUREOFFSET_H
+diff --git a/src/Mod/Part/App/PartFeatures.cpp b/src/Mod/Part/App/PartFeatures.cpp
+index 4049b8dd33..6cb00b9751 100644
+--- a/src/Mod/Part/App/PartFeatures.cpp
++++ b/src/Mod/Part/App/PartFeatures.cpp
+@@ -46,6 +46,7 @@
+ #include <App/Link.h>
+ 
+ #include <App/Document.h>
++#include "FeatureOffset.h"
+ #include "PartFeatures.h"
+ #include "TopoShapeOpCode.h"
+ 
+@@ -443,10 +444,23 @@ App::DocumentObjectExecReturn* Thickness::execute()
+     short mode = (short)Mode.getValue();
+     short join = (short)Join.getValue();
+ 
+-    this->Shape.setValue(
+-        TopoShape(0, getDocument()->getStringHasher())
+-            .makeElementThickSolid(base, shapes, thickness, tol, inter, self, mode, static_cast<JoinType>(join))
+-    );
++    double radius = 0.0;
++    if (mode == 0 && offsetCollapsesCurvedFace(base.getShape(), thickness, radius)) {
++        return new App::DocumentObjectExecReturn(
++            "The thickness reaches the radius of a curved face; use a smaller thickness."
++        );
++    }
++    TopoShape result = TopoShape(0, getDocument()->getStringHasher())
++        .makeElementThickSolid(base, shapes, thickness, tol, inter, self, mode, static_cast<JoinType>(join));
++    // The kernel can return an invalid solid, or the input unchanged, while reporting success
++    // (e.g. when a removed face is tangent to its neighbours).
++    if (!result.isNull() && !result.isValid()) {
++        return new App::DocumentObjectExecReturn("Thickness result is not a valid solid");
++    }
++    if (!result.isNull() && result.countSubShapes(TopAbs_FACE) == base.countSubShapes(TopAbs_FACE)) {
++        return new App::DocumentObjectExecReturn("Thickness was not applied (the result equals the input)");
++    }
++    this->Shape.setValue(result);
+     return Part::Feature::execute();
+ }
+ 
+diff --git a/src/Mod/PartDesign/App/FeatureThickness.cpp b/src/Mod/PartDesign/App/FeatureThickness.cpp
+index ee9b1cbe44..44aca4bc24 100644
+--- a/src/Mod/PartDesign/App/FeatureThickness.cpp
++++ b/src/Mod/PartDesign/App/FeatureThickness.cpp
+@@ -29,6 +29,7 @@
+ 
+ 
+ #include <Base/Exception.h>
++#include <Mod/Part/App/FeatureOffset.h>
+ #include "FeatureThickness.h"
+ 
+ FC_LOG_LEVEL_INIT("PartDesign", true, true)
+@@ -145,6 +146,13 @@ App::DocumentObjectExecReturn* Thickness::execute()
+                 faces = &mapIterator->second;
+                 solid = TopShape.getSubTopoShape(TopAbs_SOLID, mapIterator->first);
+             }
++            double radius = 0.0;
++            if (mode == 0 && Part::offsetCollapsesCurvedFace(solid.getShape(), thickness, radius)) {
++                return new App::DocumentObjectExecReturn(QT_TRANSLATE_NOOP(
++                    "Exception",
++                    "The thickness reaches the radius of a curved face; use a smaller thickness."
++                ));
++            }
+             TopoShape res(0);
+             try {
+                 res = solid.makeElementThickSolid(
+@@ -156,6 +164,15 @@ App::DocumentObjectExecReturn* Thickness::execute()
+                     mode,
+                     static_cast<Part::JoinType>(join)
+                 );
++                // The kernel can return an invalid solid, or the input unchanged, while reporting
++                // success (e.g. when a removed face is tangent to its neighbours).
++                if (!res.isValid()
++                    || res.countSubShapes(TopAbs_FACE) == solid.countSubShapes(TopAbs_FACE)) {
++                    return new App::DocumentObjectExecReturn(QT_TRANSLATE_NOOP(
++                        "Exception",
++                        "Failed to make thick solid: the result is invalid or unchanged"
++                    ));
++                }
+                 shapes.push_back(res);
+             }
+             catch (Standard_Failure& e) {

@@ -1,0 +1,250 @@
+diff --git a/src/Mod/ReverseEngineering/App/AppReverseEngineering.cpp b/src/Mod/ReverseEngineering/App/AppReverseEngineering.cpp
+index a13b122818..a7c55f6f1a 100644
+--- a/src/Mod/ReverseEngineering/App/AppReverseEngineering.cpp
++++ b/src/Mod/ReverseEngineering/App/AppReverseEngineering.cpp
+@@ -929,11 +929,14 @@ Points.show(np)
+         PyObject *pts;
+         PyObject *vec = nullptr;
+         const char* sacModelType = nullptr;
++        double threshold = 0.01;
+ 
+-        static const std::array<const char*,4> kwds_sample {"SacModel", "Points", "Normals", NULL};
+-        if (!Base::Wrapped_ParseTupleAndKeywords(args.ptr(), kwds.ptr(), "sO!|O", kwds_sample,
+-                                        &sacModelType, &(Points::PointsPy::Type), &pts, &vec))
++        static const std::array<const char*,5> kwds_sample {"SacModel", "Points", "Normals", "DistanceThreshold", NULL};
++        if (!Base::Wrapped_ParseTupleAndKeywords(args.ptr(), kwds.ptr(), "sO!|Od", kwds_sample,
++                                        &sacModelType, &(Points::PointsPy::Type), &pts, &vec, &threshold))
+             throw Py::Exception();
++        if (!(threshold > 0.0))
++            throw Py::ValueError("DistanceThreshold must be positive");
+ 
+         Points::PointKernel* points = static_cast<Points::PointsPy*>(pts)->getPointKernelPtr();
+         std::vector<Base::Vector3d> normals;
+@@ -956,8 +959,14 @@ Points.show(np)
+                 sacModel = SampleConsensus::SACMODEL_CONE;
+         }
+ 
++        if ((sacModel == SampleConsensus::SACMODEL_CYLINDER || sacModel == SampleConsensus::SACMODEL_CONE)
++            && normals.size() != points->size()) {
++            throw Py::ValueError("Cylinder and cone models need one normal per point (keyword Normals)");
++        }
++
+         std::vector<float> parameters;
+         SampleConsensus sample(sacModel, *points, normals);
++        sample.setDistanceThreshold(threshold);
+         std::vector<int> model;
+         double probability = sample.perform(parameters, model);
+ 
+diff --git a/src/Mod/ReverseEngineering/App/SampleConsensus.cpp b/src/Mod/ReverseEngineering/App/SampleConsensus.cpp
+index 1f534eb4a7..7262672fd6 100644
+--- a/src/Mod/ReverseEngineering/App/SampleConsensus.cpp
++++ b/src/Mod/ReverseEngineering/App/SampleConsensus.cpp
+@@ -58,46 +58,37 @@ SampleConsensus::SampleConsensus(
+ 
+ double SampleConsensus::perform(std::vector<float>& parameters, std::vector<int>& model)
+ {
++    const bool useNormals = (mySac == SACMODEL_CONE || mySac == SACMODEL_CYLINDER);
++    if (useNormals && myNormals.size() != myPoints.size()) {
++        throw Base::ValueError("Cylinder and cone models need one normal per point");
++    }
++
++    // skip invalid points (and their normals) but remember the input index of each point that is kept
+     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
++    pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
++    std::vector<int> inputIndex;
+     cloud->reserve(myPoints.size());
+-    for (Points::PointKernel::const_iterator it = myPoints.begin(); it != myPoints.end(); ++it) {
+-        if (!boost::math::isnan(it->x) && !boost::math::isnan(it->y) && !boost::math::isnan(it->z)) {
+-            cloud->push_back(pcl::PointXYZ(it->x, it->y, it->z));
++    inputIndex.reserve(myPoints.size());
++    for (std::size_t i = 0; i < myPoints.size(); i++) {
++        Base::Vector3d p = myPoints.getPoint(static_cast<int>(i));
++        if (boost::math::isnan(p.x) || boost::math::isnan(p.y) || boost::math::isnan(p.z)) {
++            continue;
+         }
++        if (useNormals) {
++            const Base::Vector3d& n = myNormals[i];
++            if (boost::math::isnan(n.x) || boost::math::isnan(n.y) || boost::math::isnan(n.z)) {
++                continue;
++            }
++            normals->push_back(pcl::Normal(n.x, n.y, n.z));
++        }
++        cloud->push_back(pcl::PointXYZ(p.x, p.y, p.z));
++        inputIndex.push_back(static_cast<int>(i));
+     }
+ 
+     cloud->width = int(cloud->points.size());
+     cloud->height = 1;
+     cloud->is_dense = true;
+ 
+-    pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
+-    if (mySac == SACMODEL_CONE || mySac == SACMODEL_CYLINDER) {
+-# if 0
+-        // Create search tree
+-        pcl::search::KdTree<pcl::PointXYZ>::Ptr tree;
+-        tree.reset (new pcl::search::KdTree<PointXYZ> (false));
+-        tree->setInputCloud (cloud);
+-
+-        // Normal estimation
+-        int ksearch = 10;
+-        pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> n;
+-        n.setInputCloud (cloud);
+-        n.setSearchMethod (tree);
+-        n.setKSearch (ksearch);
+-        n.compute (*normals);
+-# else
+-        normals->reserve(myNormals.size());
+-        for (std::vector<Base::Vector3d>::const_iterator it = myNormals.begin();
+-             it != myNormals.end();
+-             ++it) {
+-            if (!boost::math::isnan(it->x) && !boost::math::isnan(it->y)
+-                && !boost::math::isnan(it->z)) {
+-                normals->push_back(pcl::Normal(it->x, it->y, it->z));
+-            }
+-        }
+-# endif
+-    }
+-
+     // created RandomSampleConsensus object and compute the appropriated model
+     pcl::SampleConsensusModel<pcl::PointXYZ>::Ptr model_p;
+     switch (mySac) {
+@@ -130,9 +121,12 @@ double SampleConsensus::perform(std::vector<float>& parameters, std::vector<int>
+     }
+ 
+     pcl::RandomSampleConsensus<pcl::PointXYZ> ransac(model_p);
+-    ransac.setDistanceThreshold(.01);
++    ransac.setDistanceThreshold(myThreshold);
+     ransac.computeModel();
+     ransac.getInliers(model);
++    for (int& index : model) {
++        index = inputIndex[index];
++    }
+     // ransac.getModel (model);
+     Eigen::VectorXf model_p_coefficients;
+     ransac.getModelCoefficients(model_p_coefficients);
+diff --git a/src/Mod/ReverseEngineering/App/SampleConsensus.h b/src/Mod/ReverseEngineering/App/SampleConsensus.h
+index 6a06522b14..372683f725 100644
+--- a/src/Mod/ReverseEngineering/App/SampleConsensus.h
++++ b/src/Mod/ReverseEngineering/App/SampleConsensus.h
+@@ -53,10 +53,16 @@ public:
+         SACMODEL_TORUS,
+     };
+     SampleConsensus(SacModel sac, const Points::PointKernel&, const std::vector<Base::Vector3d>&);
++    void setDistanceThreshold(double threshold)
++    {
++        myThreshold = threshold;
++    }
++    /// The inlier indices in \a model refer to the input points (invalid points are skipped).
+     double perform(std::vector<float>& parameters, std::vector<int>& model);
+ 
+ private:
+     SacModel mySac;
++    double myThreshold = 0.01;
+     const Points::PointKernel& myPoints;
+     const std::vector<Base::Vector3d>& myNormals;
+ };
+diff --git a/src/Mod/ReverseEngineering/CMakeLists.txt b/src/Mod/ReverseEngineering/CMakeLists.txt
+index a282f1dbf0..218bc1f27d 100644
+--- a/src/Mod/ReverseEngineering/CMakeLists.txt
++++ b/src/Mod/ReverseEngineering/CMakeLists.txt
+@@ -7,6 +7,7 @@ endif(BUILD_GUI)
+ 
+ set(Reen_Scripts
+     Init.py
++    TestReenSampleConsensus.py
+ )
+ 
+ if(BUILD_GUI)
+diff --git a/src/Mod/ReverseEngineering/Init.py b/src/Mod/ReverseEngineering/Init.py
+index 491bbbad12..80925103e7 100644
+--- a/src/Mod/ReverseEngineering/Init.py
++++ b/src/Mod/ReverseEngineering/Init.py
+@@ -24,3 +24,5 @@
+ # *                                                                         *
+ # ***************************************************************************/
+ # FreeCAD init script of the ReverseEngineering module
++
++FreeCAD.__unit_test__ += ["TestReenSampleConsensus"]
+diff --git a/src/Mod/ReverseEngineering/TestReenSampleConsensus.py b/src/Mod/ReverseEngineering/TestReenSampleConsensus.py
+new file mode 100644
+index 0000000000..4a63dbf73b
+--- /dev/null
++++ b/src/Mod/ReverseEngineering/TestReenSampleConsensus.py
+@@ -0,0 +1,77 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++"""Tests for ReverseEngineering.sampleConsensus (input checks, inlier indices, distance threshold)."""
++
++import math
++import random
++import unittest
++
++import FreeCAD
++import Points
++
++try:
++    import ReverseEngineering as Reen
++
++    HAVE_SAC = hasattr(Reen, "sampleConsensus")
++except ImportError:
++    HAVE_SAC = False
++
++
++def cylinder_points(n, radius=0.5, seed=0):
++    rng = random.Random(seed)
++    pts, nor = [], []
++    for _ in range(n):
++        t, z = rng.uniform(0, 2 * math.pi), rng.uniform(-1, 1)
++        pts.append(FreeCAD.Vector(radius * math.cos(t), radius * math.sin(t), z))
++        nor.append(FreeCAD.Vector(math.cos(t), math.sin(t), 0))
++    return pts, nor
++
++
++def plane_points(n, z=1.0, sigma=0.0, seed=1):
++    rng = random.Random(seed)
++    return [FreeCAD.Vector(rng.uniform(-1, 1), rng.uniform(-1, 1), z + rng.gauss(0, sigma) if sigma else z)
++            for _ in range(n)]
++
++
++def kernel(vectors):
++    p = Points.Points()
++    p.addPoints(vectors)
++    return p
++
++
++@unittest.skipUnless(HAVE_SAC, "ReverseEngineering built without PCL sample consensus")
++class TestReenSampleConsensus(unittest.TestCase):
++    def test_cylinder_without_normals_raises(self):
++        # PCL's cylinder model reads one normal per point; without normals it used to read past the end and crash
++        pts, _ = cylinder_points(200)
++        with self.assertRaises(ValueError):
++            Reen.sampleConsensus(SacModel="Cylinder", Points=kernel(pts))
++
++    def test_normal_count_must_match_point_count(self):
++        pts, nor = cylinder_points(200)
++        with self.assertRaises(ValueError):
++            Reen.sampleConsensus(SacModel="Cylinder", Points=kernel(pts), Normals=nor[:10])
++
++    def test_inlier_indices_refer_to_the_input_points(self):
++        # invalid (NaN) points are skipped internally; the returned indices must still index the input
++        nan = FreeCAD.Vector(float("nan"), float("nan"), float("nan"))
++        plane = plane_points(300)
++        cyl, _ = cylinder_points(300)
++        data = [nan] * 20 + plane + cyl
++        res = Reen.sampleConsensus(SacModel="Plane", Points=kernel(data))
++        model = res["Model"]
++        self.assertGreaterEqual(len(model), 300)
++        for i in model:
++            self.assertTrue(abs(data[i].z - 1.0) < 0.01, f"index {i} is not on the plane z = 1")
++
++    def test_distance_threshold(self):
++        data = plane_points(500, sigma=0.02)
++        default = Reen.sampleConsensus(SacModel="Plane", Points=kernel(data))
++        wide = Reen.sampleConsensus(SacModel="Plane", Points=kernel(data), DistanceThreshold=0.1)
++        self.assertLess(len(default["Model"]), 400)  # the default threshold 0.01 is half the noise
++        self.assertGreaterEqual(len(wide["Model"]), 495)  # 0.1 is five standard deviations
++        with self.assertRaises(ValueError):
++            Reen.sampleConsensus(SacModel="Plane", Points=kernel(data), DistanceThreshold=0.0)
++
++
++if __name__ == "__main__":
++    unittest.main()

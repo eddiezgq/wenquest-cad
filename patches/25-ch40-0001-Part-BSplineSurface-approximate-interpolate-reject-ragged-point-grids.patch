@@ -1,0 +1,122 @@
+diff --git a/src/Mod/Part/App/BSplineSurfacePyImp.cpp b/src/Mod/Part/App/BSplineSurfacePyImp.cpp
+index ffb0bb2137..1c8ca209d9 100644
+--- a/src/Mod/Part/App/BSplineSurfacePyImp.cpp
++++ b/src/Mod/Part/App/BSplineSurfacePyImp.cpp
+@@ -1344,6 +1344,10 @@ PyObject* BSplineSurfacePy::approximate(PyObject* args, PyObject* kwds)
+             index1++;
+             index2 = 0;
+             Py::Sequence row(*it1);
++            if (row.size() != lv) {
++                // a shorter row would leave points unset, a longer one write past the array
++                Standard_Failure::Raise("all rows of the point grid must have the same length");
++            }
+             for (Py::Sequence::iterator it2 = row.begin(); it2 != row.end(); ++it2) {
+                 index2++;
+                 if ((dX == 0) || (dY == 0)) {
+@@ -1454,6 +1458,10 @@ PyObject* BSplineSurfacePy::interpolate(PyObject* args)
+             index1++;
+             index2 = 0;
+             Py::Sequence row(*it1);
++            if (row.size() != lv) {
++                // a shorter row would leave points unset, a longer one write past the array
++                Standard_Failure::Raise("all rows of the point grid must have the same length");
++            }
+             for (Py::Sequence::iterator it2 = row.begin(); it2 != row.end(); ++it2) {
+                 index2++;
+                 if (len == 1) {
+@@ -1558,6 +1566,10 @@ PyObject* BSplineSurfacePy::buildFromPolesMultsKnots(PyObject* args, PyObject* k
+             index1++;
+             index2 = 0;
+             Py::Sequence row(*it1);
++            if (row.size() != lv) {
++                // a shorter row would leave points unset, a longer one write past the array
++                Standard_Failure::Raise("all rows of the point grid must have the same length");
++            }
+             for (Py::Sequence::iterator it2 = row.begin(); it2 != row.end(); ++it2) {
+                 index2++;
+                 Py::Vector v(*it2);
+@@ -1586,6 +1598,9 @@ PyObject* BSplineSurfacePy::buildFromPolesMultsKnots(PyObject* args, PyObject* k
+                 index1++;
+                 index2 = 0;
+                 Py::Sequence row(*it1);
++                if (row.size() != lwv) {
++                    Standard_Failure::Raise("all rows of the weights must have the same length");
++                }
+                 for (Py::Sequence::iterator it2 = row.begin(); it2 != row.end(); ++it2) {
+                     index2++;
+                     Py::Float f(*it2);
+diff --git a/src/Mod/Part/CMakeLists.txt b/src/Mod/Part/CMakeLists.txt
+index eee37c308b..a7f12e1bae 100644
+--- a/src/Mod/Part/CMakeLists.txt
++++ b/src/Mod/Part/CMakeLists.txt
+@@ -70,6 +70,7 @@ set(CompoundTools_Scripts
+ 
+ set(Part_tests
+     parttests/__init__.py
++    parttests/TestBSplineSurfaceGrid.py
+     parttests/BRep_tests.py
+     parttests/Geom2d_tests.py
+     parttests/part_test_objects.py
+diff --git a/src/Mod/Part/TestPartApp.py b/src/Mod/Part/TestPartApp.py
+index a2e347921a..52b175de7f 100644
+--- a/src/Mod/Part/TestPartApp.py
++++ b/src/Mod/Part/TestPartApp.py
+@@ -37,6 +37,7 @@ from parttests.TopoShapeListTest import TopoShapeListTest
+ from parttests.TopoShapeTest import TopoShapeTest
+ from parttests.shape_immutability_tests import ShapeImmutabilityTests
+ from parttests.TestPartMirror import TestPartMirroringRegression
++from parttests.TestBSplineSurfaceGrid import TestBSplineSurfaceGrid
+ from parttests.TestUndoMemSize import TestUndoMemSize
+ from parttests.book_regression_tests import BookRegressionTests
+ 
+diff --git a/src/Mod/Part/parttests/TestBSplineSurfaceGrid.py b/src/Mod/Part/parttests/TestBSplineSurfaceGrid.py
+new file mode 100644
+index 0000000000..05867676b3
+--- /dev/null
++++ b/src/Mod/Part/parttests/TestBSplineSurfaceGrid.py
+@@ -0,0 +1,45 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++"""BSplineSurface.approximate / interpolate / buildFromPolesMultsKnots must reject a point grid whose rows
++differ in length."""
++
++import unittest
++
++import FreeCAD as App
++import Part
++
++
++def row(k, y):
++    return [App.Vector(i / (k - 1), y, 0.1 * (i / (k - 1)) ** 2) for i in range(k)]
++
++
++class TestBSplineSurfaceGrid(unittest.TestCase):
++    def test_approximate_regular_grid(self):
++        s = Part.BSplineSurface()
++        s.approximate(Points=[row(8, j / 5) for j in range(6)], ParamType="ChordLength", Tolerance=1e-3)
++        p = s.value(0.5, 0.5)
++        self.assertAlmostEqual(p.y, 0.5, delta=0.05)
++
++    def test_approximate_rejects_short_rows(self):
++        # the missing points used to be taken as (0, 0, 0): no error, a wrong surface
++        pts = [row(8, 0.0)] + [row(3, j / 5) for j in range(1, 6)]
++        with self.assertRaises(Part.OCCError):
++            Part.BSplineSurface().approximate(Points=pts, ParamType="ChordLength", Tolerance=1e-3)
++
++    def test_approximate_rejects_long_rows(self):
++        pts = [row(4, 0.0)] + [row(40, j / 5) for j in range(1, 6)]
++        with self.assertRaises(Part.OCCError):
++            Part.BSplineSurface().approximate(Points=pts, ParamType="ChordLength", Tolerance=1e-3)
++
++    def test_interpolate_rejects_short_rows(self):
++        pts = [row(6, 0.0)] + [row(3, j / 5) for j in range(1, 6)]
++        with self.assertRaises(Part.OCCError):
++            Part.BSplineSurface().interpolate(pts)
++
++    def test_build_from_poles_rejects_short_rows(self):
++        poles = [row(4, 0.0)] + [row(3, j / 3) for j in range(1, 4)]
++        with self.assertRaises(Part.OCCError):
++            Part.BSplineSurface().buildFromPolesMultsKnots(poles, [4, 4], [4, 4], [0, 1], [0, 1], False, False, 3, 3)
++
++
++if __name__ == "__main__":
++    unittest.main()

@@ -1,0 +1,259 @@
+diff --git a/src/Mod/Part/App/TopoShape.pyi b/src/Mod/Part/App/TopoShape.pyi
+index 849018519f..49a781b354 100644
+--- a/src/Mod/Part/App/TopoShape.pyi
++++ b/src/Mod/Part/App/TopoShape.pyi
+@@ -1109,7 +1109,6 @@ class TopoShape(ComplexGeoData):
+         """
+         ...
+ 
+-    @constmethod
+     def fixTolerance(self, value: float, ShapeType: str = "Shape") -> None:
+         """
+         Sets (enforces) tolerances in a shape to the given value
+@@ -1123,7 +1122,6 @@ class TopoShape(ComplexGeoData):
+         """
+         ...
+ 
+-    @constmethod
+     def limitTolerance(self, tmin: float, tmax: float = 0, ShapeType: str = "Shape") -> bool:
+         """
+         Limits tolerances in a shape
+diff --git a/src/Mod/Part/App/TopoShapePyImp.cpp b/src/Mod/Part/App/TopoShapePyImp.cpp
+index 3e4b695be8..2515f9c914 100644
+--- a/src/Mod/Part/App/TopoShapePyImp.cpp
++++ b/src/Mod/Part/App/TopoShapePyImp.cpp
+@@ -2218,7 +2218,7 @@ PyObject* TopoShapePy::globalTolerance(PyObject* args) const
+     }
+ }
+ 
+-PyObject* TopoShapePy::fixTolerance(PyObject* args) const
++PyObject* TopoShapePy::fixTolerance(PyObject* args)
+ {
+     double value;
+     PyObject* type = reinterpret_cast<PyObject*>(&TopoShapePy::Type);
+@@ -2227,7 +2227,6 @@ PyObject* TopoShapePy::fixTolerance(PyObject* args) const
+     }
+ 
+     try {
+-        TopoDS_Shape shape = this->getTopoShapePtr()->getShape();
+         PyTypeObject* pyType = reinterpret_cast<PyTypeObject*>(type);
+         TopAbs_ShapeEnum shapetype = ShapeTypeFromPyType(pyType);
+         if (!PyType_IsSubtype(pyType, &TopoShapePy::Type)) {
+@@ -2235,6 +2234,11 @@ PyObject* TopoShapePy::fixTolerance(PyObject* args) const
+             return nullptr;
+         }
+ 
++        // Copy on write: the TShapes may be shared with other shapes, e.g. with the
++        // Shape of a document object (Part::PropertyPartShape hands out shapes that
++        // share its TShapes). Changing tolerances in place would silently change them.
++        *getTopoShapePtr() = getTopoShapePtr()->makeElementCopy(nullptr, false);
++        TopoDS_Shape shape = this->getTopoShapePtr()->getShape();
+         ShapeFix_ShapeTolerance fix;
+         fix.SetTolerance(shape, value, shapetype);
+         Py_Return;
+@@ -2245,7 +2249,7 @@ PyObject* TopoShapePy::fixTolerance(PyObject* args) const
+     }
+ }
+ 
+-PyObject* TopoShapePy::limitTolerance(PyObject* args) const
++PyObject* TopoShapePy::limitTolerance(PyObject* args)
+ {
+     double tmin;
+     double tmax = 0;
+@@ -2255,7 +2259,6 @@ PyObject* TopoShapePy::limitTolerance(PyObject* args) const
+     }
+ 
+     try {
+-        TopoDS_Shape shape = this->getTopoShapePtr()->getShape();
+         PyTypeObject* pyType = reinterpret_cast<PyTypeObject*>(type);
+         TopAbs_ShapeEnum shapetype = ShapeTypeFromPyType(pyType);
+         if (!PyType_IsSubtype(pyType, &TopoShapePy::Type)) {
+@@ -2263,6 +2266,11 @@ PyObject* TopoShapePy::limitTolerance(PyObject* args) const
+             return nullptr;
+         }
+ 
++        // Copy on write: the TShapes may be shared with other shapes, e.g. with the
++        // Shape of a document object (Part::PropertyPartShape hands out shapes that
++        // share its TShapes). Changing tolerances in place would silently change them.
++        *getTopoShapePtr() = getTopoShapePtr()->makeElementCopy(nullptr, false);
++        TopoDS_Shape shape = this->getTopoShapePtr()->getShape();
+         ShapeFix_ShapeTolerance fix;
+         Standard_Boolean ok = fix.LimitTolerance(shape, tmin, tmax, shapetype);
+         return PyBool_FromLong(ok ? 1 : 0);
+@@ -2750,11 +2758,25 @@ void TopoShapePy::setOrientation(Py::String arg)
+     getTopoShapePtr()->setShape(sh);
+ }
+ 
+-static Py::List getElements(const TopoShape& sh, TopAbs_ShapeEnum type, TopAbs_ShapeEnum avoid = TopAbs_SHAPE)
++// Sub-shapes share their TShapes with the parent. If the parent Python object is
++// immutable (e.g. the Shape of a document object), so are its sub-shapes: otherwise
++// setting e.g. obj.Shape.Vertexes[0].Tolerance changes the document object's shape
++// without notification, undo or recompute.
++static Py::List getElements(
++    const TopoShapePy* parent,
++    TopAbs_ShapeEnum type,
++    TopAbs_ShapeEnum avoid = TopAbs_SHAPE
++)
+ {
++    auto base = const_cast<Base::PyObjectBase*>(static_cast<const Base::PyObjectBase*>(parent));
++    const bool readOnly = base->isConst();
+     Py::List ret;
+-    for (auto& shape : sh.getSubTopoShapes(type, avoid)) {
+-        ret.append(shape2pyshape(shape));
++    for (auto& shape : parent->getTopoShapePtr()->getSubTopoShapes(type, avoid)) {
++        Py::Object child = shape2pyshape(shape);
++        if (readOnly && PyObject_TypeCheck(child.ptr(), &TopoShapePy::Type)) {
++            static_cast<Base::PyObjectBase*>(child.ptr())->setConst();
++        }
++        ret.append(child);
+     }
+     return ret;
+ }
+@@ -2770,7 +2792,7 @@ PyObject* TopoShapePy::getChildShapes(PyObject* args) const
+     PY_TRY
+     {
+         return Py::new_reference_to(getElements(
+-            *getTopoShapePtr(),
++            this,
+             TopoShape::shapeType(type),
+             !Base::Tools::isNullOrEmpty(avoid) ? TopoShape::shapeType(avoid) : TopAbs_SHAPE
+         ));
+@@ -2780,47 +2802,47 @@ PyObject* TopoShapePy::getChildShapes(PyObject* args) const
+ 
+ Py::List TopoShapePy::getSubShapes() const
+ {
+-    return getElements(*getTopoShapePtr(), TopAbs_SHAPE);
++    return getElements(this, TopAbs_SHAPE);
+ }
+ 
+ Py::List TopoShapePy::getFaces() const
+ {
+-    return getElements(*getTopoShapePtr(), TopAbs_FACE);
++    return getElements(this, TopAbs_FACE);
+ }
+ 
+ Py::List TopoShapePy::getVertexes() const
+ {
+-    return getElements(*getTopoShapePtr(), TopAbs_VERTEX);
++    return getElements(this, TopAbs_VERTEX);
+ }
+ 
+ Py::List TopoShapePy::getShells() const
+ {
+-    return getElements(*getTopoShapePtr(), TopAbs_SHELL);
++    return getElements(this, TopAbs_SHELL);
+ }
+ 
+ Py::List TopoShapePy::getSolids() const
+ {
+-    return getElements(*getTopoShapePtr(), TopAbs_SOLID);
++    return getElements(this, TopAbs_SOLID);
+ }
+ 
+ Py::List TopoShapePy::getCompSolids() const
+ {
+-    return getElements(*getTopoShapePtr(), TopAbs_COMPSOLID);
++    return getElements(this, TopAbs_COMPSOLID);
+ }
+ 
+ Py::List TopoShapePy::getEdges() const
+ {
+-    return getElements(*getTopoShapePtr(), TopAbs_EDGE);
++    return getElements(this, TopAbs_EDGE);
+ }
+ 
+ Py::List TopoShapePy::getWires() const
+ {
+-    return getElements(*getTopoShapePtr(), TopAbs_WIRE);
++    return getElements(this, TopAbs_WIRE);
+ }
+ 
+ Py::List TopoShapePy::getCompounds() const
+ {
+-    return getElements(*getTopoShapePtr(), TopAbs_COMPOUND);
++    return getElements(this, TopAbs_COMPOUND);
+ }
+ 
+ Py::Float TopoShapePy::getLength() const
+diff --git a/src/Mod/Part/CMakeLists.txt b/src/Mod/Part/CMakeLists.txt
+index dee0b40bf8..09e34eea59 100644
+--- a/src/Mod/Part/CMakeLists.txt
++++ b/src/Mod/Part/CMakeLists.txt
+@@ -81,6 +81,7 @@ set(Part_tests
+     parttests/book_regression_tests.py
+     parttests/TestTangentMode3-0.21.FCStd
+     parttests/TestPartMirror.py
++    parttests/shape_immutability_tests.py
+ )
+ 
+ add_custom_target(PartScripts ALL SOURCES
+diff --git a/src/Mod/Part/TestPartApp.py b/src/Mod/Part/TestPartApp.py
+index ae30186411..440867f2c5 100644
+--- a/src/Mod/Part/TestPartApp.py
++++ b/src/Mod/Part/TestPartApp.py
+@@ -35,6 +35,7 @@ from parttests.Geom2d_tests import Geom2dTests
+ from parttests.regression_tests import RegressionTests
+ from parttests.TopoShapeListTest import TopoShapeListTest
+ from parttests.TopoShapeTest import TopoShapeTest
++from parttests.shape_immutability_tests import ShapeImmutabilityTests
+ from parttests.TestPartMirror import TestPartMirroringRegression
+ from parttests.book_regression_tests import BookRegressionTests
+ 
+diff --git a/src/Mod/Part/parttests/shape_immutability_tests.py b/src/Mod/Part/parttests/shape_immutability_tests.py
+new file mode 100644
+index 0000000000..c3772afa6e
+--- /dev/null
++++ b/src/Mod/Part/parttests/shape_immutability_tests.py
+@@ -0,0 +1,52 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++"""The Shape of a document object must not be changed through the Python objects
++FreeCAD hands out for it ("FreeCAD kernel: decode, verify, correct", chapter 31).
++
++obj.Shape returns an immutable TopoShape whose TShapes are shared with the object's
++stored shape. Changing tolerances through it, through its sub-shapes or through a
++shape derived from it (translated) used to change the stored shape silently.
++"""
++import unittest
++
++import FreeCAD as App
++import Part  # noqa: F401
++
++V = App.Vector
++
++
++class ShapeImmutabilityTests(unittest.TestCase):
++    def setUp(self):
++        self.doc = App.newDocument("ShapeImmutability")
++        self.box = self.doc.addObject("Part::Box", "Box")
++        self.doc.recompute()
++
++    def tearDown(self):
++        App.closeDocument(self.doc.Name)
++
++    def stored_tolerance(self):
++        return max(v.Tolerance for v in self.box.Shape.Vertexes)
++
++    def test_fix_tolerance_on_object_shape_is_refused(self):
++        with self.assertRaises(ReferenceError):
++            self.box.Shape.fixTolerance(0.05)
++        self.assertLess(self.stored_tolerance(), 1e-6)
++
++    def test_sub_shape_tolerance_on_object_shape_is_refused(self):
++        with self.assertRaises(ReferenceError):
++            self.box.Shape.Vertexes[0].Tolerance = 0.05
++        with self.assertRaises(ReferenceError):
++            self.box.Shape.Edges[0].fixTolerance(0.05)
++        self.assertLess(self.stored_tolerance(), 1e-6)
++
++    def test_derived_shape_is_copied_on_write(self):
++        s = self.box.Shape.translated(V(10, 0, 0))
++        s.fixTolerance(0.05)
++        self.assertAlmostEqual(max(v.Tolerance for v in s.Vertexes), 0.05)
++        self.assertLess(self.stored_tolerance(), 1e-6)
++
++    def test_copy_can_be_changed(self):
++        s = self.box.Shape.copy()
++        s.Vertexes[0].Tolerance = 0.05
++        s.fixTolerance(0.05)
++        self.assertAlmostEqual(max(v.Tolerance for v in s.Vertexes), 0.05)
++        self.assertLess(self.stored_tolerance(), 1e-6)
