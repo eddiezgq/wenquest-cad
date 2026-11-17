@@ -20,7 +20,7 @@ $Exe = Join-Path $Bin "FreeCAD.exe"
 $Cmd = Join-Path $Bin "FreeCADCmd.exe"
 if (-not (Test-Path $Exe)) { Step "没有找到 $Exe，请先运行 build-wqcad.ps1"; exit 1 }
 
-function FC($argList, $log) {
+function Invoke-FreeCADCmd($argList, $log) {
     $a = @("run", "--frozen", "--manifest-path", "`"$Manifest`"", "`"$Cmd`"") + $argList
     $p = Start-Process -FilePath $Pixi -ArgumentList $a -WorkingDirectory $Src -RedirectStandardOutput $log -RedirectStandardError "$log.err" -Wait -NoNewWindow -PassThru
     return $p.ExitCode
@@ -30,12 +30,12 @@ Step "1/3 窗口标题"
 Copy-Item (Join-Path $Kit "branding.xml") (Join-Path $Bin "branding.xml") -Force
 
 Step "2/3 测试"
-$code = FC @("--version") (Join-Path $Logs "version.log")
+$code = Invoke-FreeCADCmd @("--version") (Join-Path $Logs "version.log")
 $ver = (Get-Content (Join-Path $Logs "version.log"), (Join-Path $Logs "version.log.err") -ErrorAction SilentlyContinue) -join " "
 Step "  FreeCADCmd --version：$ver（退出码 $code）"
 foreach ($t in "TestPartApp", "TestSketcherApp", "TestPartDesignApp", "MeshTestsApp") {
     $log = Join-Path $Logs "$t.log"
-    $code = FC @("-t", $t) $log
+    $code = Invoke-FreeCADCmd @("-t", $t) $log
     $tail = (Get-Content $log, "$log.err" | Select-String -Pattern "^(Ran \d+ tests|OK|FAILED)" | ForEach-Object { $_.Line }) -join "；"
     Step "  $t：$tail（退出码 $code）"
 }
@@ -43,22 +43,27 @@ foreach ($f in Get-ChildItem (Join-Path $Kit "tests") -Filter *.py) {
     $env:WQCAD_TEST_FILE = $f.FullName
     $env:WQCAD_OUT = Join-Path $Logs ($f.BaseName + ".json")
     $log = Join-Path $Logs ($f.BaseName + ".log")
-    $code = FC @("`"$(Join-Path $Kit "run_book_tests.py")`"") $log
+    $code = Invoke-FreeCADCmd @("`"$(Join-Path $Kit "run_book_tests.py")`"") $log
     $res = Get-Content $log, "$log.err" | Select-String -Pattern "^WQCAD " | ForEach-Object { $_.Line }
     if (-not $res) { $res = "没有结果（见 $log）" }
     Step "  本书测试 $($f.BaseName)：$res（退出码 $code）"
 }
 
 Step "3/3 启动器与桌面快捷方式"
-$Launcher = Join-Path $Root "问渠CAD.cmd"
+$Launcher = Join-Path $Root "WenQuestCAD.cmd"
 $cmdText = "@echo off`r`ncd /d `"$Src`"`r`n`"$Pixi`" run --frozen --manifest-path `"$Manifest`" `"$Exe`" %*`r`n"
 [System.IO.File]::WriteAllText($Launcher, $cmdText, (New-Object System.Text.UTF8Encoding($false)))
-$lnk = Join-Path ([Environment]::GetFolderPath("Desktop")) "问渠 CAD.lnk"
+# WScript.Shell 处理不了中文文件名：先用英文名建快捷方式，再改名
+$desk = [Environment]::GetFolderPath("Desktop")
+$tmpLnk = Join-Path $desk "WenQuestCAD.lnk"
+$lnk = Join-Path $desk "问渠 CAD.lnk"
 $ws = New-Object -ComObject WScript.Shell
-$sc = $ws.CreateShortcut($lnk)
+$sc = $ws.CreateShortcut($tmpLnk)
 $sc.TargetPath = $Launcher
 $sc.WorkingDirectory = $Src
 $sc.WindowStyle = 7
 $sc.IconLocation = "$Exe,0"
 $sc.Save()
+if (Test-Path -LiteralPath $lnk) { Remove-Item -LiteralPath $lnk -Force }
+Move-Item -LiteralPath $tmpLnk -Destination $lnk -Force
 Step "完成。双击桌面上的“问渠 CAD”启动（首次启动约需半分钟）。"
