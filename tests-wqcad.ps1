@@ -21,7 +21,7 @@ $Cmd = Join-Path $Bin "FreeCADCmd.exe"
 if (-not (Test-Path $Exe)) { Step "没有找到 $Exe，请先运行 build-wqcad.ps1"; exit 1 }
 
 function Invoke-FreeCADCmd($argList, $log) {
-    $a = @("run", "--frozen", "--manifest-path", "`"$Manifest`"", "`"$Cmd`"") + $argList
+    $a = @("run", "--frozen", "--manifest-path", "`"$($Manifest -replace '\\','/')`"", "`"$($Cmd -replace '\\','/')`"") + $argList
     $p = Start-Process -FilePath $Pixi -ArgumentList $a -WorkingDirectory $Src -RedirectStandardOutput $log -RedirectStandardError "$log.err" -Wait -NoNewWindow -PassThru
     return $p.ExitCode
 }
@@ -51,7 +51,8 @@ foreach ($f in Get-ChildItem (Join-Path $Kit "tests") -Filter *.py) {
 
 Step "3/3 启动器与桌面快捷方式"
 $Launcher = Join-Path $Root "WenQuestCAD.cmd"
-$cmdText = "@echo off`r`ncd /d `"$Src`"`r`n`"$Pixi`" run --frozen --manifest-path `"$Manifest`" `"$Exe`" %*`r`n"
+# pixi run 把命令里的反斜杠当转义符吃掉，所以传给它的路径一律用正斜杠
+$cmdText = "@echo off`r`ncd /d `"$Src`"`r`n`"$Pixi`" run --frozen --manifest-path `"$($Manifest -replace '\\','/')`" `"$($Exe -replace '\\','/')`" %*`r`n"
 [System.IO.File]::WriteAllText($Launcher, $cmdText, (New-Object System.Text.UTF8Encoding($false)))
 # WScript.Shell 处理不了中文文件名：先用英文名建快捷方式，再改名
 $desk = [Environment]::GetFolderPath("Desktop")
