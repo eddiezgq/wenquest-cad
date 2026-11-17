@@ -35,7 +35,7 @@
 4. **安装位置**：程序就在 `C:\wqcad\FreeCAD\.pixi\envs\default\Library\bin\FreeCAD.exe`（pixi 环境本身就是运行环境），不另做安装包。自用够了；发给别人用的安装包放到以后。
 5. **磁盘**：C 盘预留 40 GB。
 6. **Windows 智能应用控制**（11-17 首次运行发现）：它会拦下 pixi 装的 cmake 等未签名程序，自己编的问渠 CAD 也会被拦。处理：先查状态；若为“开”，关掉它（Windows 安全中心 → 应用和浏览器控制 → 智能应用控制 → 关）。关掉后不能再打开（除非重装 Windows），杀毒（Defender）不受影响。若是公司管控的电脑，不改策略，改在 WSL（Windows 自带的 Linux）里构建运行。
-8. **启动方式**（11-17 发现）：FreeCAD.exe 要在 pixi 环境里启动（Python、Qt 的 DLL 在环境的其他目录），直接双击会静默退出。所以桌面快捷方式指向 `C:\wqcad\问渠CAD.cmd`，由它经 `pixi run` 启动；测试也经 `pixi run` 运行（`tests-wqcad.ps1`）。
+8. **启动方式**（11-17 发现）：FreeCAD.exe 要在 pixi 环境里启动（Python、Qt 的 DLL 在环境的其他目录），直接双击会静默退出。所以桌面快捷方式指向 `C:\wqcad\WenQuestCAD.cmd`，由它经 `pixi run` 启动；测试也经 `pixi run` 运行（`tests-wqcad.ps1`）。
 9. **编译时间**：第一次编译约 8 小时（8 线程、31 GB 内存；比原估计长得多，主要是 Defender 扫描新文件，且默认连 FreeCAD 自带的 C++ 单元测试一起编）。补丁不变时重跑脚本跳过打补丁，只增量编译。
 7. **pixi 设置**：允许 conda 包运行安装后脚本（`run-post-link-scripts`），Qt、PySide 需要；脚本第一次会重装一遍环境。
 
