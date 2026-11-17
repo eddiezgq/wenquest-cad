@@ -34,6 +34,8 @@
    全过程写日志 `logs\build-日期时间.log`。脚本可重复运行：已下载的源码与依赖不重下。
 4. **安装位置**：程序就在 `C:\wqcad\FreeCAD\.pixi\envs\default\Library\bin\FreeCAD.exe`（pixi 环境本身就是运行环境），不另做安装包。自用够了；发给别人用的安装包放到以后。
 5. **磁盘**：C 盘预留 40 GB。
+6. **Windows 智能应用控制**（11-17 首次运行发现）：它会拦下 pixi 装的 cmake 等未签名程序，自己编的问渠 CAD 也会被拦。处理：先查状态；若为“开”，关掉它（Windows 安全中心 → 应用和浏览器控制 → 智能应用控制 → 关）。关掉后不能再打开（除非重装 Windows），杀毒（Defender）不受影响。若是公司管控的电脑，不改策略，改在 WSL（Windows 自带的 Linux）里构建运行。
+7. **pixi 设置**：允许 conda 包运行安装后脚本（`run-post-link-scripts`），Qt、PySide 需要；脚本第一次会重装一遍环境。
 
 ## 四、0.1 的验收
 
