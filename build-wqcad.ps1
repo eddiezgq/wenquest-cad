@@ -62,7 +62,13 @@ $env:CMAKE_BUILD_PARALLEL_LEVEL = "$jobs"
 Step "4/7 编译（内存 $memGB GB，CPU $([Environment]::ProcessorCount) 线程，并行 $jobs）"
 # 部分 conda 包（如 Qt、PySide）安装后要运行自带的设置脚本，pixi 默认不运行
 pixi config set --local run-post-link-scripts insecure; Run "pixi 设置 run-post-link-scripts"
-pixi install --force-reinstall; Run "重装依赖（让设置脚本生效）"
+$marker = Join-Path $Src ".pixi\wqcad-postlink-done"
+if (-not (Test-Path $marker)) {
+    # 第一次打开这项设置时，把已装好的环境删掉重装（包在本机缓存里，不重新下载）
+    if (Test-Path (Join-Path $Src ".pixi\envs\default")) { Remove-Item -Recurse -Force (Join-Path $Src ".pixi\envs\default") }
+    pixi install; Run "重装依赖（让设置脚本生效）"
+    New-Item -ItemType File -Force $marker | Out-Null
+}
 pixi run configure-release; Run "配置（configure-release）"
 Step "  配置完成"
 pixi run build-release; Run "编译（build-release）"
