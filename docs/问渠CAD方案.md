@@ -52,8 +52,10 @@
 1. ✅ 27 个补丁全部打上；编译、安装无错误（编译约 8 小时）。
 2. ✅ TestPartApp 157 个测试通过（含本书登记进去的回归测试）；TestSketcherApp 33 个通过（1 个原本就跳过）；TestPartDesignApp 168 个通过；MeshTestsApp 44 个通过（1 个原本就跳过）。
 3. ✅ 本书 16 组测试 15 组全过；第 6 章 TestPartBooleanFarFromOrigin 2 个不过——预期内（问题在 OCCT，0.1 不含 OCCT 补丁）。
-4. ⏳ 界面检查：待 Eddie 做（步骤见回复；样例模型 `acceptance/sewn_wedge30.step`、`sewn_cube10.step` 取自本书第 26 章）。
-5. ⏳ 窗口标题：第一次显示“FreeCAD 1.1.4”（原 branding 无效），已改用程序名，待 Eddie 重开确认。
+4. 界面检查（样例模型 `acceptance/sewn_wedge30.step`、`sewn_cube10.step` 取自本书第 26 章）：
+   - ✅ 第 26 章（检查几何）：楔形体报出两条警告“planar faces meet outside edge tolerance (2 x tolerance)”“(1.04 x tolerance)”；立方体“Solid, No errors”，无误报（2026-11-17）。
+   - ⏳ 第 5 章 0002（展开曲面）：待 Eddie 做。
+5. ✅ 窗口标题：第一次显示“FreeCAD 1.1.4”（原 branding 无效），改用程序名 `ExeName` 后显示“WenQuest CAD 1.1.4”（2026-11-17）。
 
 启动：11-17 双击启动成功（修正了 pixi 吃掉路径反斜杠的问题后）。
 
