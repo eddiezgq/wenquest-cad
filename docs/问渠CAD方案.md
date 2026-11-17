@@ -28,7 +28,7 @@
    2. 在 `C:\wqcad\FreeCAD` 取 FreeCAD 1.1.4 源码（含子模块，关闭换行转换）；
    3. 回到 1.1.4 原样，按 `series.txt` 逐个打补丁，打不上立即停；
    4. `pixi run configure-release` → `build-release` → `install-release`（FreeCAD 官方的构建任务；并行数按内存定，每 2 GB 一个）；
-   5. 把 `branding.xml` 放进程序目录：窗口标题显示“问渠 CAD 0.1（基于 FreeCAD 1.1.4）”；
+   5. 把 `branding.xml` 放进程序目录：程序名“WenQuest CAD”，窗口标题显示“WenQuest CAD 1.1.4”；
    6. 跑测试（第四节），结果写进 `logs\`；
    7. 桌面建快捷方式“问渠 CAD”。
    全过程写日志 `logs\build-日期时间.log`。脚本可重复运行：已下载的源码与依赖不重下。
@@ -45,7 +45,7 @@
 2. FreeCAD 自带测试：TestPartApp（其中已含本书登记进去的测试）、TestSketcherApp、TestPartDesignApp、MeshTestsApp 全部通过。
 3. 本书的 16 组 FreeCAD 测试：除第 6 章那组（问题在 OCCT）外全部通过。
 4. 打开图形界面，手工检查两处只在界面里的修正：第 5 章“展开面”命令、第 26 章“检查几何”对话框（我给检查步骤）。
-5. 窗口标题显示“问渠 CAD 0.1（基于 FreeCAD 1.1.4）”。
+5. 窗口标题显示“WenQuest CAD 1.1.4”（11-17 修改：FreeCAD 1.1.4 的窗口标题由程序名加版本号拼成，`WindowTitle` 一打开文件就被覆盖；程序名只能用英文，版本号是 FreeCAD 的版本，不能改——改了会写进保存的文件）。程序名同时决定设置文件夹，问渠 CAD 的设置与官方 FreeCAD 分开。
 
 验收结果（2026-11-17，Eddie 的电脑，FreeCAD 1.1.4 Revision 20260928）：
 
@@ -53,7 +53,9 @@
 2. ✅ TestPartApp 157 个测试通过（含本书登记进去的回归测试）；TestSketcherApp 33 个通过（1 个原本就跳过）；TestPartDesignApp 168 个通过；MeshTestsApp 44 个通过（1 个原本就跳过）。
 3. ✅ 本书 16 组测试 15 组全过；第 6 章 TestPartBooleanFarFromOrigin 2 个不过——预期内（问题在 OCCT，0.1 不含 OCCT 补丁）。
 4. ⏳ 界面检查：待 Eddie 做（步骤见回复；样例模型 `acceptance/sewn_wedge30.step`、`sewn_cube10.step` 取自本书第 26 章）。
-5. ⏳ 窗口标题：待 Eddie 打开确认。
+5. ⏳ 窗口标题：第一次显示“FreeCAD 1.1.4”（原 branding 无效），已改用程序名，待 Eddie 重开确认。
+
+启动：11-17 双击启动成功（修正了 pixi 吃掉路径反斜杠的问题后）。
 
 ## 五、仓库
 

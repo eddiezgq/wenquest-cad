@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- FreeCAD 1.1.4 builds the main-window title from ExeName and the build version
+     ("<ExeName> 1.1.4"); WindowTitle is overwritten as soon as a document opens.
+     ExeName must stay ASCII (parts of FreeCAD read it as Latin-1). It also names the
+     settings folder, so 问渠 CAD keeps its settings apart from an official FreeCAD. -->
 <Branding>
-  <WindowTitle>问渠 CAD 0.1（基于 FreeCAD 1.1.4）</WindowTitle>
+  <ExeName>WenQuest CAD</ExeName>
+  <WindowTitle>WenQuest CAD</WindowTitle>
 </Branding>
