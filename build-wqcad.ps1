@@ -43,6 +43,12 @@ git config core.autocrlf false
 
 # ---------- 3 打补丁 ----------
 Step "3/7 回到 1.1.4 原样，按序打 27 个补丁"
+$seriesHash = (Get-FileHash (Join-Path $Kit "patches\series.txt")).Hash
+foreach ($p in Get-ChildItem (Join-Path $Kit "patches") -Filter *.patch) { $seriesHash += (Get-FileHash $p.FullName).Hash }
+$stampFile = Join-Path $Src ".pixi\wqcad-patched.txt"
+$skipPatch = (Test-Path $stampFile) -and ((Get-Content $stampFile -Raw).Trim() -eq $seriesHash)
+if ($skipPatch) { Step "  补丁与上次相同，已打好，跳过（重打会让大量文件重新编译）" }
+if (-not $skipPatch) {
 git reset --hard HEAD | Out-Null; Run "git reset"
 git clean -fd | Out-Null; Run "git clean"
 $n = 0
@@ -54,12 +60,15 @@ foreach ($line in Get-Content (Join-Path $Kit "patches\series.txt") -Encoding UT
     Step "  已打 $file"
 }
 Step "共打上 $n 个补丁"
+New-Item -ItemType Directory -Force (Join-Path $Src ".pixi") | Out-Null
+Set-Content -Path $stampFile -Value $seriesHash -Encoding ASCII
+}
 
 # ---------- 4 编译、安装 ----------
 $memGB = [math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
 $jobs = [math]::Max(1, [math]::Min([Environment]::ProcessorCount, [math]::Floor($memGB / 2)))
 $env:CMAKE_BUILD_PARALLEL_LEVEL = "$jobs"
-Step "4/7 编译（内存 $memGB GB，CPU $([Environment]::ProcessorCount) 线程，并行 $jobs）"
+Step "4/7 编译（第一次约 8 小时）（内存 $memGB GB，CPU $([Environment]::ProcessorCount) 线程，并行 $jobs）"
 # 部分 conda 包（如 Qt、PySide）安装后要运行自带的设置脚本，pixi 默认不运行
 pixi config set --local run-post-link-scripts insecure; Run "pixi 设置 run-post-link-scripts"
 $marker = Join-Path $Src ".pixi\wqcad-postlink-done"
@@ -80,35 +89,6 @@ $Cmd = Join-Path $Bin "FreeCADCmd.exe"
 if (-not (Test-Path $Exe)) { Stop-Build "安装后没有找到 $Exe" }
 Step "  安装完成：$Exe"
 
-# ---------- 5 品牌 ----------
-Step "5/7 窗口标题"
-Copy-Item (Join-Path $Kit "branding.xml") (Join-Path $Bin "branding.xml") -Force
-
-# ---------- 6 测试 ----------
-Step "6/7 测试"
-foreach ($t in "TestPartApp", "TestSketcherApp", "TestPartDesignApp", "MeshTestsApp") {
-    $log = Join-Path $Logs "$t.log"
-    Start-Process -FilePath $Cmd -ArgumentList "-t", $t -RedirectStandardOutput $log -RedirectStandardError "$log.err" -Wait -NoNewWindow
-    $tail = (Get-Content $log, "$log.err" | Select-String -Pattern "^(Ran \d+ tests|OK|FAILED)" | ForEach-Object { $_.Line }) -join "；"
-    Step "  $t：$tail"
-}
-foreach ($f in Get-ChildItem (Join-Path $Kit "tests") -Filter *.py) {
-    $env:WQCAD_TEST_FILE = $f.FullName
-    $env:WQCAD_OUT = Join-Path $Logs ($f.BaseName + ".json")
-    $log = Join-Path $Logs ($f.BaseName + ".log")
-    Start-Process -FilePath $Cmd -ArgumentList ("`"" + (Join-Path $Kit "run_book_tests.py") + "`"") -RedirectStandardOutput $log -RedirectStandardError "$log.err" -Wait -NoNewWindow
-    $res = Get-Content $log, "$log.err" | Select-String -Pattern "^WQCAD " | ForEach-Object { $_.Line }
-    if (-not $res) { $res = "没有结果（崩溃？见 $log）" }
-    Step "  本书测试 $($f.BaseName)：$res"
-}
-
-# ---------- 7 快捷方式 ----------
-Step "7/7 桌面快捷方式“问渠 CAD”"
-$lnk = Join-Path ([Environment]::GetFolderPath("Desktop")) "问渠 CAD.lnk"
-$ws = New-Object -ComObject WScript.Shell
-$sc = $ws.CreateShortcut($lnk)
-$sc.TargetPath = $Exe
-$sc.WorkingDirectory = $Bin
-$sc.Save()
-Step "完成。双击桌面上的“问渠 CAD”启动。"
+# ---------- 5–7 窗口标题、测试、启动器 ----------
 Stop-Transcript | Out-Null
+& (Join-Path $Kit "tests-wqcad.ps1") -Root $Root
