@@ -60,6 +60,9 @@ $memGB = [math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemor
 $jobs = [math]::Max(1, [math]::Min([Environment]::ProcessorCount, [math]::Floor($memGB / 2)))
 $env:CMAKE_BUILD_PARALLEL_LEVEL = "$jobs"
 Step "4/7 编译（内存 $memGB GB，CPU $([Environment]::ProcessorCount) 线程，并行 $jobs）"
+# 部分 conda 包（如 Qt、PySide）安装后要运行自带的设置脚本，pixi 默认不运行
+pixi config set --local run-post-link-scripts insecure; Run "pixi 设置 run-post-link-scripts"
+pixi install --force-reinstall; Run "重装依赖（让设置脚本生效）"
 pixi run configure-release; Run "配置（configure-release）"
 Step "  配置完成"
 pixi run build-release; Run "编译（build-release）"
