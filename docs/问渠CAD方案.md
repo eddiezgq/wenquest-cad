@@ -47,7 +47,13 @@
 4. 打开图形界面，手工检查两处只在界面里的修正：第 5 章“展开面”命令、第 26 章“检查几何”对话框（我给检查步骤）。
 5. 窗口标题显示“问渠 CAD 0.1（基于 FreeCAD 1.1.4）”。
 
-验收结果写回本文件。
+验收结果（2026-11-17，Eddie 的电脑，FreeCAD 1.1.4 Revision 20260928）：
+
+1. ✅ 27 个补丁全部打上；编译、安装无错误（编译约 8 小时）。
+2. ✅ TestPartApp 157 个测试通过（含本书登记进去的回归测试）；TestSketcherApp 33 个通过（1 个原本就跳过）；TestPartDesignApp 168 个通过；MeshTestsApp 44 个通过（1 个原本就跳过）。
+3. ✅ 本书 16 组测试 15 组全过；第 6 章 TestPartBooleanFarFromOrigin 2 个不过——预期内（问题在 OCCT，0.1 不含 OCCT 补丁）。
+4. ⏳ 界面检查：待 Eddie 做（步骤见回复；样例模型 `acceptance/sewn_wedge30.step`、`sewn_cube10.step` 取自本书第 26 章）。
+5. ⏳ 窗口标题：待 Eddie 打开确认。
 
 ## 五、仓库
 
