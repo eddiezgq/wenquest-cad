@@ -54,7 +54,9 @@
 3. ✅ 本书 16 组测试 15 组全过；第 6 章 TestPartBooleanFarFromOrigin 2 个不过——预期内（问题在 OCCT，0.1 不含 OCCT 补丁）。
 4. 界面检查（样例模型 `acceptance/sewn_wedge30.step`、`sewn_cube10.step` 取自本书第 26 章）：
    - ✅ 第 26 章（检查几何）：楔形体报出两条警告“planar faces meet outside edge tolerance (2 x tolerance)”“(1.04 x tolerance)”；立方体“Solid, No errors”，无误报（2026-11-17）。
-   - ⏳ 第 5 章 0002（展开曲面）：待 Eddie 做。
+   - ✅ 第 5 章 0002（展开曲面）：圆柱侧面 Unwrap face，报告视图输出“Unwrap Face: edge lengths changed by up to 0.000% (rms 0.000%), 0 flipped triangles”——圆柱面可展，变形为零，符合预期（2026-11-17）。同屏的红字“AttachEngine::getInertialPropsOfShape: infinite shape provided”是 FreeCAD 原有提示（PartDesign 圆柱附着时出现），本发行版的补丁不涉及附着代码。
+
+**0.1 验收完成（2026-11-17）。**
 5. ✅ 窗口标题：第一次显示“FreeCAD 1.1.4”（原 branding 无效），改用程序名 `ExeName` 后显示“WenQuest CAD 1.1.4”（2026-11-17）。
 
 启动：11-17 双击启动成功（修正了 pixi 吃掉路径反斜杠的问题后）。
