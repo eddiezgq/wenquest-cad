@@ -1,0 +1,30 @@
+diff --git a/src/IntCurve/IntCurve_IntConicConic_1.cxx b/src/IntCurve/IntCurve_IntConicConic_1.cxx
+index 4ecd7bc..d68a282 100644
+--- a/src/IntCurve/IntCurve_IntConicConic_1.cxx
++++ b/src/IntCurve/IntCurve_IntConicConic_1.cxx
+@@ -838,8 +838,23 @@ void IntCurve_IntConicConic::Perform(const gp_Circ2d& Circle1
+ 
+   for( i=0; i<NbSolTotal ; i++)
+   { 
+-    if(((R1 * SolutionC1[i].Length()) <=Tol2) && 
+-              ((R2 * SolutionC2[i].Length())<=Tol2))
++    // An interval produced by a transversal crossing must be reduced to a point whatever its
++    // length: its length is about 2*Tol/sin(angle) and exceeds Tol2 when the curves cross at an
++    // angle below about 40 degrees.  Circle1 then passes from one side of Circle2 to the other,
++    // i.e. the signed distances to Circle2 at the two ends of the interval have opposite signs.
++    // A tangential contact keeps the same sign and is left unchanged.
++    Standard_Boolean isCrossing = Standard_False;
++    if (SolutionC1[i].Length() > 0.0 && SolutionC1[i].Length() < M_PI)
++    {
++      const Standard_Real aDA =
++        ElCLib::Value(SolutionC1[i].Binf, Circle1).Distance(Circle2.Location()) - R2;
++      const Standard_Real aDB =
++        ElCLib::Value(SolutionC1[i].Bsup, Circle1).Distance(Circle2.Location()) - R2;
++      isCrossing = (aDA * aDB < 0.0);
++    }
++    if(isCrossing ||
++       (((R1 * SolutionC1[i].Length()) <=Tol2) && 
++              ((R2 * SolutionC2[i].Length())<=Tol2)))
+     {
+       Standard_Real t=(SolutionC1[i].Binf+SolutionC1[i].Bsup)*0.5;
+       SolutionC1[i].Binf=SolutionC1[i].Bsup=t;

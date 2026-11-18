@@ -1,0 +1,28 @@
+diff --git a/src/CSLib/CSLib.cxx b/src/CSLib/CSLib.cxx
+index f526dd5..90c262e 100644
+--- a/src/CSLib/CSLib.cxx
++++ b/src/CSLib/CSLib.cxx
+@@ -42,11 +42,20 @@ gp_Dir&              Normal
+   Standard_Real D1VMag = D1V.SquareMagnitude();
+   gp_Vec D1UvD1V = D1U.Crossed(D1V);
+ 
+-  if (D1UMag <= gp::Resolution() && D1VMag <= gp::Resolution()) {
++  // A first derivative that is negligible relative to the other one carries no
++  // direction: at a degenerated point (e.g. the pole of a sphere converted to a
++  // B-spline) it is pure rounding noise, and its cross product with the other
++  // derivative points anywhere.  Treat it as null so that the caller falls back
++  // to higher derivatives instead of returning a wrong normal.
++  const Standard_Real THE_REL_NULL2 = 1.0e-20; // (1e-10)^2
++  const Standard_Boolean isUNull = D1UMag <= gp::Resolution() || D1UMag <= THE_REL_NULL2 * D1VMag;
++  const Standard_Boolean isVNull = D1VMag <= gp::Resolution() || D1VMag <= THE_REL_NULL2 * D1UMag;
++
++  if (isUNull && isVNull) {
+      theStatus = CSLib_D1IsNull;
+   }
+-  else if (D1UMag <= gp::Resolution())           theStatus = CSLib_D1uIsNull;
+-  else if (D1VMag <= gp::Resolution())           theStatus = CSLib_D1vIsNull;
++  else if (isUNull)           theStatus = CSLib_D1uIsNull;
++  else if (isVNull)           theStatus = CSLib_D1vIsNull;
+ //  else if ((D1VMag / D1UMag) <= RealEpsilon())   theStatus = CSLib_D1vD1uRatioIsNull;
+ //  else if ((D1UMag / D1VMag) <= RealEpsilon())   theStatus = CSLib_D1uD1vRatioIsNull;
+   else  {

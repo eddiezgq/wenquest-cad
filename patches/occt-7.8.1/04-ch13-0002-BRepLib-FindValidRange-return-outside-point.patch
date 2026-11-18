@@ -1,0 +1,16 @@
+diff --git a/src/BRepLib/BRepLib_1.cxx b/src/BRepLib/BRepLib_1.cxx
+index 5fe6d8c..5bb9b79 100644
+--- a/src/BRepLib/BRepLib_1.cxx
++++ b/src/BRepLib/BRepLib_1.cxx
+@@ -144,7 +144,10 @@ static Standard_Boolean findNearestValidPoint(
+       anUIn = aMidU;
+     aDelta = Abs(anUOut - anUIn);
+   }
+-  thePar = (anUIn + anUOut) * 0.5;
++  // Return the end of the bracket that is known to lie outside the sphere,
++  // so that the found range is really not covered by the vertex tolerance
++  // (the midpoint may lie inside the sphere by up to theEps / 2).
++  thePar = anUOut;
+   return Standard_True;
+ }
+ 

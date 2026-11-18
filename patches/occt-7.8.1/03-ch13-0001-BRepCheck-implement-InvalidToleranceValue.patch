@@ -1,0 +1,50 @@
+diff --git a/src/BRepCheck/BRepCheck_Analyzer.cxx b/src/BRepCheck/BRepCheck_Analyzer.cxx
+index 90282fc..364590f 100644
+--- a/src/BRepCheck/BRepCheck_Analyzer.cxx
++++ b/src/BRepCheck/BRepCheck_Analyzer.cxx
+@@ -15,6 +15,11 @@
+ // commercial license or contractual agreement.
+ 
+ #include <BRepCheck_Analyzer.hxx>
++#include <BRep_Tool.hxx>
++#include <BRepLib.hxx>
++#include <TopExp.hxx>
++#include <TopoDS_Edge.hxx>
++#include <TopoDS_Vertex.hxx>
+ 
+ #include <BRepCheck_Edge.hxx>
+ #include <BRepCheck_Face.hxx>
+@@ -166,6 +171,33 @@ public:
+               {
+                 aFaceEdgeRes->InContext (aShape);
+ 
++                // Tolerance value control (was NYI): the tolerance rules
++                // Tol(Face) <= Tol(Edge) <= Tol(Vertex), and the edge must not be
++                // swallowed by the tolerance spheres of its own vertices.
++                if (!isInvalidTolerance
++                    && Handle(BRepCheck_Face)::DownCast(aResult)->GeometricControls())
++                {
++                  const TopoDS_Edge& anE   = TopoDS::Edge(exp.Current());
++                  const Standard_Real aTolE = BRep_Tool::Tolerance(anE);
++                  if (aTolE < BRep_Tool::Tolerance(TopoDS::Face(aShape)))
++                  {
++                    isInvalidTolerance = Standard_True;
++                  }
++                  TopoDS_Vertex aV1, aV2;
++                  TopExp::Vertices(anE, aV1, aV2);
++                  if ((!aV1.IsNull() && BRep_Tool::Tolerance(aV1) < aTolE)
++                      || (!aV2.IsNull() && BRep_Tool::Tolerance(aV2) < aTolE))
++                  {
++                    isInvalidTolerance = Standard_True;
++                  }
++                  Standard_Real aF, aL;
++                  if (!BRep_Tool::Degenerated(anE) && !aV1.IsNull() && !aV2.IsNull()
++                      && !BRepLib::FindValidRange(anE, aF, aL))
++                  {
++                    isInvalidTolerance = Standard_True;
++                  }
++                }
++
+                 if (performwire)
+                 {
+                   Standard_Mutex::Sentry aLock (aFaceEdgeRes->GetMutex());

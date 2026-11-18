@@ -1,0 +1,68 @@
+diff --git a/src/IntCurveSurface/IntCurveSurface_Inter.gxx b/src/IntCurveSurface/IntCurveSurface_Inter.gxx
+index 3624a2f..5dbc934 100644
+--- a/src/IntCurveSurface/IntCurveSurface_Inter.gxx
++++ b/src/IntCurveSurface/IntCurveSurface_Inter.gxx
+@@ -915,6 +915,31 @@ void IntCurveSurface_Inter::PerformConicSurf(const gp_Lin&   Line,
+ 					     const Standard_Real V2) {
+   
+ 
++  // Line - elementary quadric (cylinder, sphere, cone) intersection solved in a frame
++  // translated to the quadric's location. IntAna_Quadric holds the implicit equation in
++  // global coordinates, whose constant term carries |location|^2: far from the origin it
++  // swamps the radius (relative error ~ eps * |location|^2 / radius^2) and the roots are
++  // lost. The parameter on the line does not change under the translation; the points
++  // are moved back before the surface parameters are computed.
++  auto aLinQuadricLocal = [&](const IntAna_Quadric& theLocalQuadric, const gp_Vec& theShift)
++  {
++    IntAna_IntConicQuad anInter(Line.Translated(-theShift), theLocalQuadric);
++    if (!anInter.IsDone() || anInter.IsInQuadric() || anInter.IsParallel())
++    {
++      // no points to move: keep the flags handling of AppendIntAna
++      AppendIntAna(curve, surface, anInter);
++      return;
++    }
++    for (Standard_Integer i = 1; i <= anInter.NbPoints(); i++)
++    {
++      const gp_Pnt aP = anInter.Point(i).Translated(theShift);
++      const Standard_Real aW = anInter.ParamOnConic(i);
++      Standard_Real aU = 0.0, aV = 0.0;
++      IntCurveSurface_ComputeParamsOnQuadric(surface, aP, aU, aV);
++      AppendPoint(curve, aW, surface, aU, aV);
++    }
++  };
++
+   GeomAbs_SurfaceType SurfaceType = TheSurfaceTool::GetType(surface);
+   Standard_Boolean isAnaProcessed = Standard_True;
+   switch(SurfaceType) { 
+@@ -926,14 +951,16 @@ void IntCurveSurface_Inter::PerformConicSurf(const gp_Lin&   Line,
+     }
+   case GeomAbs_Cylinder:
+     {
+-      IntAna_IntConicQuad LinCylinder(Line,TheSurfaceTool::Cylinder(surface));
+-      AppendIntAna(curve,surface,LinCylinder);
++      const gp_Cylinder aCyl = TheSurfaceTool::Cylinder(surface);
++      const gp_Vec aShift(aCyl.Location().XYZ());
++      aLinQuadricLocal(IntAna_Quadric(aCyl.Translated(-aShift)), aShift);
+       break;
+     }
+   case GeomAbs_Sphere:
+     {
+-      IntAna_IntConicQuad LinSphere(Line,TheSurfaceTool::Sphere(surface));
+-      AppendIntAna(curve,surface,LinSphere);
++      const gp_Sphere aSph = TheSurfaceTool::Sphere(surface);
++      const gp_Vec aShift(aSph.Location().XYZ());
++      aLinQuadricLocal(IntAna_Quadric(aSph.Translated(-aShift)), aShift);
+       break;
+     }
+   case GeomAbs_Torus: 
+@@ -959,8 +986,8 @@ void IntCurveSurface_Inter::PerformConicSurf(const gp_Lin&   Line,
+       const Standard_Real correction = 1.E+5*Precision::Angular();
+       gp_Cone cn = TheSurfaceTool::Cone(surface);
+       if(Abs(cn.SemiAngle()) < M_PI/2.0 - correction) {
+-        IntAna_IntConicQuad LinCone(Line, cn);
+-        AppendIntAna(curve, surface, LinCone);
++        const gp_Vec aShift(cn.Location().XYZ());
++        aLinQuadricLocal(IntAna_Quadric(cn.Translated(-aShift)), aShift);
+       }
+       else
+         isAnaProcessed = Standard_False;
