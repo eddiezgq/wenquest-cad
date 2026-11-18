@@ -26,6 +26,7 @@ $PyEnv = Join-Path $Src ".pixi\envs\default"
 $Py = Join-Path $PyEnv "python.exe"
 $Cmd = Join-Path $PyEnv "Library\bin\FreeCADCmd.exe"
 $ModDir = Join-Path $PyEnv "Library\Mod"
+$Repo = Join-Path $Root "freecad-ai-parts"
 if (-not (Test-Path $Cmd)) { Fail "没有找到 $Cmd，请先完成 0.1（build-wqcad.ps1）" }
 
 # pixi run 会吃掉反斜杠，路径一律换成正斜杠
@@ -37,29 +38,19 @@ function Invoke-Env($exe, $argList, $log) {
 }
 
 Step "1/4 取 freecad-ai-parts（固定提交 $($Commit.Substring(0,7))）"
-# 那个仓库的 factory/ 里有 aux.kicad_sch 这类 Windows 保留的文件名，在 Windows 上无法 checkout。
-# 所以只下载（不 checkout），再用 git archive 把工作台用到的目录导出来，factory/ 根本不碰。
-$Git = Join-Path $Root "freecad-ai-parts"
-$Repo = Join-Path $Root ("freecad-ai-parts-" + $Commit.Substring(0,7))
-if (-not (Test-Path (Join-Path $Git ".git"))) {
-    git clone --no-checkout https://github.com/eddiezgq/freecad-ai-parts.git $Git 2>&1 | Write-Host
-    if (-not (Test-Path (Join-Path $Git ".git"))) { Fail "git clone 失败（这个仓库是私有的，需要用你的 GitHub 账号登录）" }
+if (-not (Test-Path (Join-Path $Repo ".git"))) {
+    git clone --no-checkout https://github.com/eddiezgq/freecad-ai-parts.git $Repo 2>&1 | Write-Host
+    if (-not (Test-Path (Join-Path $Repo ".git"))) { Fail "git clone 失败（这个仓库是私有的，需要用你的 GitHub 账号登录）" }
 }
-git -C $Git cat-file -e "$Commit^{commit}" 2>$null
-if ($LASTEXITCODE -ne 0) { git -C $Git fetch --quiet origin 2>&1 | Write-Host }
-git -C $Git cat-file -e "$Commit^{commit}" 2>$null
-if ($LASTEXITCODE -ne 0) { Fail "下载的仓库里没有提交 $Commit" }
-if (-not (Test-Path (Join-Path $Repo "pyproject.toml"))) {
-    New-Item -ItemType Directory -Force $Repo | Out-Null
-    $tar = Join-Path $Logs "freecad-ai-parts.tar"
-    $paths = @("pyproject.toml", "LICENSE", "NOTICE", "README.md", "freecad_addon", "engine", "kb", "analysis", "mcp_server", "llm_gateway", "ingest", "licensing", "schema", "data", "tests")
-    git -C $Git archive --format=tar -o $tar $Commit @paths 2>&1 | Write-Host
-    if (-not (Test-Path $tar)) { Fail "git archive 失败" }
-    & "$env:SystemRoot\System32\tar.exe" -xf $tar -C $Repo 2>&1 | Write-Host
-    Remove-Item $tar -Force
-    if (-not (Test-Path (Join-Path $Repo "pyproject.toml"))) { Fail "解开失败" }
-}
-Step "  已取出到 $Repo"
+# 仓库的 factory/ 里有 aux.kicad_sch 这类 Windows 保留的文件名：git 默认连登记都拒绝（invalid path）。
+# 只对这个仓库关掉这项检查，并且只取工作台用到的目录，factory/ 不写到硬盘上
+git -C $Repo config core.protectNTFS false
+git -C $Repo sparse-checkout set freecad_addon engine kb analysis mcp_server llm_gateway ingest licensing schema data tests 2>&1 | Write-Host
+git -C $Repo fetch --quiet origin 2>&1 | Write-Host
+git -C $Repo -c advice.detachedHead=false checkout --quiet --force $Commit 2>&1 | Write-Host
+$head = (git -C $Repo rev-parse HEAD).Trim()
+if ($head -ne $Commit) { Fail "切换到 $Commit 失败（现在是 $head）" }
+Step "  已在 $head"
 
 Step "2/4 用问渠 CAD 的 Python 装依赖（基本依赖 + 对话）"
 $reqPy = Join-Path $Logs "ai-req.py"
