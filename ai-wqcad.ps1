@@ -42,7 +42,9 @@ if (-not (Test-Path (Join-Path $Repo ".git"))) {
     git clone --no-checkout https://github.com/eddiezgq/freecad-ai-parts.git $Repo 2>&1 | Write-Host
     if (-not (Test-Path (Join-Path $Repo ".git"))) { Fail "git clone 失败（这个仓库是私有的，需要用你的 GitHub 账号登录）" }
 }
-# 只取工作台用到的目录：仓库的 factory/ 里有 aux.kicad_sch 这类 Windows 不允许的文件名，整库取出会失败
+# 仓库的 factory/ 里有 aux.kicad_sch 这类 Windows 保留的文件名：git 默认连登记都拒绝（invalid path）。
+# 只对这个仓库关掉这项检查，并且只取工作台用到的目录，factory/ 不写到硬盘上
+git -C $Repo config core.protectNTFS false
 git -C $Repo sparse-checkout set freecad_addon engine kb analysis mcp_server llm_gateway ingest licensing schema data tests 2>&1 | Write-Host
 git -C $Repo fetch --quiet origin 2>&1 | Write-Host
 git -C $Repo -c advice.detachedHead=false checkout --quiet --force $Commit 2>&1 | Write-Host
