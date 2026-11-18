@@ -39,9 +39,11 @@ function Invoke-Env($exe, $argList, $log) {
 
 Step "1/4 取 freecad-ai-parts（固定提交 $($Commit.Substring(0,7))）"
 if (-not (Test-Path (Join-Path $Repo ".git"))) {
-    git clone https://github.com/eddiezgq/freecad-ai-parts.git $Repo 2>&1 | Write-Host
-    if ($LASTEXITCODE -ne 0) { Fail "git clone 失败（这个仓库是私有的，需要用你的 GitHub 账号登录）" }
+    git clone --no-checkout https://github.com/eddiezgq/freecad-ai-parts.git $Repo 2>&1 | Write-Host
+    if (-not (Test-Path (Join-Path $Repo ".git"))) { Fail "git clone 失败（这个仓库是私有的，需要用你的 GitHub 账号登录）" }
 }
+# 只取工作台用到的目录：仓库的 factory/ 里有 aux.kicad_sch 这类 Windows 不允许的文件名，整库取出会失败
+git -C $Repo sparse-checkout set freecad_addon engine kb analysis mcp_server llm_gateway ingest licensing schema data tests 2>&1 | Write-Host
 git -C $Repo fetch --quiet origin 2>&1 | Write-Host
 git -C $Repo -c advice.detachedHead=false checkout --quiet --force $Commit 2>&1 | Write-Host
 $head = (git -C $Repo rev-parse HEAD).Trim()
