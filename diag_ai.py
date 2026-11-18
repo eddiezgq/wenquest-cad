@@ -50,6 +50,8 @@ try:
     r = httpx.get(f"https://{host}/v1/models", timeout=20,
                   headers={"x-api-key": os.environ.get("ANTHROPIC_API_KEY", ""), "anthropic-version": "2023-06-01"})
     print("httpx GET /v1/models ->", r.status_code, r.text[:200].replace("\n", " "))
-except Exception:
-    print("HTTPX FAILURE:")
-    traceback.print_exc()
+except Exception as e:  # noqa: BLE001 —— only the type and a masked message: httpx echoes illegal header values
+    msg = str(e)
+    if "header value" in msg.lower():
+        msg = msg.split("value")[0] + "value <hidden> — the key contains a space, quote or line break"
+    print("HTTPX FAILURE:", type(e).__name__, msg)
