@@ -67,7 +67,7 @@ if (-not (Test-Path $stamp) -or (Get-Content $stamp -Raw).Trim() -ne $hash) {
 
 Step "3/5 配置（只要 3 个程序库用到的模块）"
 $cfg = @("cmake", "-G", "Ninja", "-S", "`"$(Fwd $Occt)`"", "-B", "`"$(Fwd $Build)`"",
-    "-DCMAKE_BUILD_TYPE=Release",
+    "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
     "-DBUILD_MODULE_FoundationClasses=ON", "-DBUILD_MODULE_ModelingData=ON", "-DBUILD_MODULE_ModelingAlgorithms=ON",
     "-DBUILD_MODULE_Visualization=OFF", "-DBUILD_MODULE_ApplicationFramework=OFF", "-DBUILD_MODULE_DataExchange=OFF",
     "-DBUILD_MODULE_DETools=OFF", "-DBUILD_MODULE_Draw=OFF", "-DBUILD_DOC_Overview=OFF",
