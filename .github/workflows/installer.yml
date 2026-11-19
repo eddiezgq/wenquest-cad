@@ -157,6 +157,8 @@ jobs:
           $Env = "$env:ROOT\FreeCAD\.pixi\envs\default"
           foreach ($d in @("Library\include", "pkgs", "Library\share\doc", "Library\lib\cmake")) { if (Test-Path "$Env\$d") { Remove-Item -Recurse -Force "$Env\$d" } }
           Get-ChildItem -Recurse "$Env\Library\lib" -Filter *.lib | Remove-Item -Force
+          Get-ChildItem -Recurse -File $Env -Include *.pdb | Remove-Item -Force          # 调试符号用户用不上
+          Get-ChildItem -Recurse -Directory $Env -Filter __pycache__ | Remove-Item -Recurse -Force
           "环境大小 $([math]::Round((Get-ChildItem -Recurse -File $Env | Measure-Object Length -Sum).Sum / 1GB, 2)) GB"
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item -Recurse -Force "$env:GITHUB_WORKSPACE\kit\installer\*" out\
