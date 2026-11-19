@@ -128,6 +128,20 @@ jobs:
           pixi run python -m freecad_addon.install --standalone --mod-dir "$Env/Library/Mod"
           if (-not (Test-Path "$Env\Library\Mod\FreeCADAIParts\InitGui.py")) { throw "AI 工作台没装上" }
           Remove-Item Env:\PYTHONPATH
+          # 第 175 轮：测试版一年授权（授权码由问渠学习平台发，wq_license 内置美国、国内两把公钥）；AI 工作台的程序只放字节码
+          $M = "$Env\Library\Mod\FreeCADAIParts"
+          Copy-Item "$env:GITHUB_WORKSPACE\kit\installer\wq_license.py", "$env:GITHUB_WORKSPACE\kit\installer\wq_gate.py" "$M\lib\"
+          $ig = Get-Content "$M\InitGui.py" -Raw -Encoding UTF8
+          $ig2 = [regex]::Replace($ig, '(?m)^register\(\)\s*$', "import wq_gate`nif wq_gate.licensed('AI Parts'):`n    register()`n")
+          if ($ig2 -eq $ig) { throw "InitGui 里找不到 register()" }
+          [IO.File]::WriteAllText("$M\InitGui.py", $ig2, (New-Object Text.UTF8Encoding $false))
+          if (Test-Path "$M\lib\tests") { Remove-Item -Recurse -Force "$M\lib\tests" }
+          & "$Env\python.exe" -m compileall -q -b -j 0 "$M\lib"
+          if ($LASTEXITCODE -ne 0) { throw "compileall" }
+          Get-ChildItem -Recurse "$M\lib" -Filter *.py | Remove-Item -Force
+          Get-ChildItem -Recurse -Directory "$M\lib" -Filter __pycache__ | Remove-Item -Recurse -Force
+          & "$Env\python.exe" -c "import sys; sys.path.insert(0, r'$M\lib'); import wq_license, freecad_addon; print('GATE-OK', bool(wq_license.KEYS['us']), bool(wq_license.KEYS['cn']))"
+          if ($LASTEXITCODE -ne 0) { throw "AI 工作台字节码导入失败" }
           "ccx: $(Test-Path "$Env\Library\bin\ccx.exe")"
       - name: 冒烟测试（无界面打开、测试脚本）
         if: steps.build.outputs.finished == 'true'
