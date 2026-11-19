@@ -24,7 +24,7 @@ WizardStyle=modern
 ShowLanguageDialog=yes
 LicenseFile=license-zh.txt
 [Languages]
-Name: "zh"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"; LicenseFile: "license-zh.txt"
+Name: "zh"; MessagesFile: "ChineseSimplified.isl"; LicenseFile: "license-zh.txt"
 Name: "en"; MessagesFile: "compiler:Default.isl"; LicenseFile: "license-en.txt"
 [Files]
 Source: "{#EnvDir}\*"; DestDir: "{app}\env"; Flags: recursesubdirs createallsubdirs ignoreversion
