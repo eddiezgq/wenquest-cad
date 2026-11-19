@@ -1,0 +1,3 @@
+# 补丁按原样取出（Windows 上 git 默认把换行改成 CRLF，补丁就打不上了）
+patches/** -text
+installer/** -text
