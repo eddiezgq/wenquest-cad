@@ -1,0 +1,8 @@
+﻿WenQuest CAD beta — terms of use
+
+1. This is a beta for registered users, licensed for one year; renew or update from the WenQuest download page.
+2. WenQuest CAD is based on the open-source FreeCAD (LGPL 2.1 or later) and Open CASCADE Technology (LGPL 2.1 with exception) and includes fixes to them.
+   As LGPL requires, the source of these fixes is at https://github.com/eddiezgq/wenquest-cad (patches folder), and you may replace the FreeCAD and OCCT libraries under env\Library\bin with your own builds.
+   Other bundled open-source components (Python, Qt, VTK, CalculiX, Gmsh, etc.) remain under their own licences; see the licence files in the env folder.
+3. WenQuest's own parts (AI workbench, parts library, calculation programs) are copyright WenQuest, for your own use during the licence term; no copying, resale or reverse engineering.
+4. The beta is provided as is; results must be checked by the user. AI drafts, people confirm. Example data are fictitious.

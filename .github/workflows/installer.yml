@@ -1,0 +1,177 @@
+# 问渠 CAD 安装包（第 175 轮，测试版）：在 GitHub 的 Windows 机器上编 FreeCAD 1.1.4 + 27 个补丁 + AI 工作台，打成带安装向导的 Setup.exe。
+# 一次编译超过单个任务 6 小时的上限，所以分几段接力：每段最多编 5 小时，没编完就把 build/release 存进缓存，下一段接着编（Ninja 增量）。
+# 源码每段重新取，文件时间统一改成 2020-01-01（比缓存里的目标文件旧），Ninja 才不会把所有东西当成“改过了”重编。
+name: WenQuest CAD installer
+on:
+  workflow_dispatch:
+    inputs:
+      ai_commit:
+        description: "freecad-ai-parts 固定提交（同 ai-wqcad.ps1）"
+        default: "c5cb1c278502e159bd2dc255806f377fa7366591"
+      version:
+        description: "测试版版本号"
+        default: "0.3.0-beta"
+permissions:
+  contents: write
+concurrency:
+  group: wqcad-installer
+  cancel-in-progress: false
+env:
+  ROOT: D:\wqcad
+  BUDGET_MIN: "290"
+jobs:
+  build:
+    strategy:
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        leg: [1, 2, 3, 4]
+    runs-on: windows-2022
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: kit }
+      - name: 已经编完、打好包了？（前面某一段做完就跳过）
+        id: done
+        uses: actions/cache/restore@v4
+        with:
+          path: kit/.done
+          key: wqcad-done-${{ github.run_id }}
+          lookup-only: true
+      - name: pixi
+        if: steps.done.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          iwr -useb https://pixi.sh/install.ps1 | iex
+          "$env:USERPROFILE\.pixi\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: 取 FreeCAD 1.1.4、打补丁、源码时间统一
+        if: steps.done.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $Src = "$env:ROOT\FreeCAD"
+          git -c core.autocrlf=false clone --quiet --branch 1.1.4 --depth 1 --recurse-submodules --shallow-submodules https://github.com/FreeCAD/FreeCAD.git $Src
+          Set-Location $Src
+          git config core.autocrlf false
+          $n = 0
+          foreach ($line in Get-Content "$env:GITHUB_WORKSPACE\kit\patches\series.txt" -Encoding UTF8) {
+            $file = $line.Split("`t")[0]; if (-not $file) { continue }
+            git apply --index --whitespace=nowarn "$env:GITHUB_WORKSPACE\kit\patches\$file"
+            if ($LASTEXITCODE -ne 0) { throw "补丁打不上：$file" }
+            $n++
+          }
+          "打上 $n 个补丁"
+          $t = [datetime]'2020-01-01'
+          Get-ChildItem -Recurse -File -Force -Path $Src -Exclude .git | Where-Object { $_.FullName -notmatch '\\\.git\\' } | ForEach-Object { $_.LastWriteTime = $t }
+      - name: 取上一段的编译结果
+        if: steps.done.outputs.cache-hit != 'true'
+        id: prev
+        uses: actions/cache/restore@v4
+        with:
+          path: D:\wqcad\FreeCAD\build\release
+          key: wqcad-build-${{ github.run_id }}-${{ matrix.leg }}
+          restore-keys: wqcad-build-${{ github.run_id }}-
+      - name: 依赖（pixi 环境）与配置
+        if: steps.done.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Set-Location "$env:ROOT\FreeCAD"
+          pixi config set --local run-post-link-scripts insecure
+          pixi install
+          if ($LASTEXITCODE -ne 0) { throw "pixi install" }
+          if (-not (Test-Path build\release\CMakeCache.txt)) {
+            pixi run cmake --preset conda-windows-release "-DCMAKE_GENERATOR_PLATFORM=" "-DCMAKE_GENERATOR_TOOLSET=" "-DENABLE_DEVELOPER_TESTS=OFF"
+            if ($LASTEXITCODE -ne 0) { throw "configure" }
+          }
+      - name: 编译（这一段最多 ${{ env.BUDGET_MIN }} 分钟）
+        if: steps.done.outputs.cache-hit != 'true'
+        id: build
+        shell: pwsh
+        run: |
+          Set-Location "$env:ROOT\FreeCAD"
+          $env:CMAKE_BUILD_PARALLEL_LEVEL = "4"
+          $p = Start-Process -FilePath pixi -ArgumentList @("run", "cmake", "--build", "build/release") -NoNewWindow -PassThru -RedirectStandardOutput build-out.log -RedirectStandardError build-err.log
+          $ok = $p.WaitForExit([int]$env:BUDGET_MIN * 60 * 1000)
+          if (-not $ok) {
+            "时间到，存起来下一段接着编"
+            taskkill /T /F /PID $p.Id | Out-Null
+            Start-Sleep 20
+            Get-Content build-out.log -Tail 5
+            "finished=false" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+            exit 0
+          }
+          Get-Content build-out.log -Tail 15; Get-Content build-err.log -Tail 30
+          if ($p.ExitCode -ne 0) { throw "编译出错（退出码 $($p.ExitCode)）" }
+          "finished=true" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+      - name: 存这一段的编译结果
+        if: steps.done.outputs.cache-hit != 'true' && steps.build.outputs.finished == 'false'
+        uses: actions/cache/save@v4
+        with:
+          path: D:\wqcad\FreeCAD\build\release
+          key: wqcad-build-${{ github.run_id }}-${{ matrix.leg }}
+      - name: 安装进环境、装 AI 工作台、品牌
+        if: steps.build.outputs.finished == 'true'
+        shell: pwsh
+        run: |
+          $Src = "$env:ROOT\FreeCAD"; Set-Location $Src
+          pixi run cmake --install build/release
+          if ($LASTEXITCODE -ne 0) { throw "install" }
+          $Env = "$Src\.pixi\envs\default"
+          Copy-Item "$env:GITHUB_WORKSPACE\kit\branding.xml" "$Env\Library\bin\branding.xml" -Force
+          $Repo = "$env:ROOT\freecad-ai-parts"
+          git clone --quiet https://github.com/eddiezgq/freecad-ai-parts.git $Repo
+          git -C $Repo -c advice.detachedHead=false checkout --quiet "${{ inputs.ai_commit }}"
+          $env:PYTHONUTF8 = "1"
+          & "$Env\python.exe" -c "import sys,tomllib;p=tomllib.load(open(sys.argv[1],'rb'))['project'];r=list(p['dependencies'])+list(p['optional-dependencies']['llm'])+list(p['optional-dependencies']['fea']);open(sys.argv[2],'w').write('\n'.join(x.split('#')[0].strip() for x in r if x.strip()))" "$Repo\pyproject.toml" req.txt
+          pixi run python -m pip install --disable-pip-version-check --no-warn-script-location -r req.txt
+          if ($LASTEXITCODE -ne 0) { throw "pip" }
+          $env:PYTHONPATH = $Repo
+          pixi run python -m freecad_addon.install --standalone --mod-dir "$Env/Library/Mod"
+          if (-not (Test-Path "$Env\Library\Mod\FreeCADAIParts\InitGui.py")) { throw "AI 工作台没装上" }
+          Remove-Item Env:\PYTHONPATH
+          "ccx: $(Test-Path "$Env\Library\bin\ccx.exe")"
+      - name: 冒烟测试（无界面打开、测试脚本）
+        if: steps.build.outputs.finished == 'true'
+        shell: pwsh
+        run: |
+          $Src = "$env:ROOT\FreeCAD"; Set-Location $Src
+          pixi run .pixi/envs/default/Library/bin/FreeCADCmd.exe -c "import FreeCAD,Part;print('WQCAD-OK', FreeCAD.Version()[:3], Part.makeBox(1,2,3).Volume)"
+          pixi run .pixi/envs/default/Library/bin/FreeCADCmd.exe "$env:GITHUB_WORKSPACE/kit/run_book_tests.py" 2>&1 | Select-Object -Last 25
+      - name: 瘦身、写启动器、打安装包
+        if: steps.build.outputs.finished == 'true'
+        shell: pwsh
+        run: |
+          $Env = "$env:ROOT\FreeCAD\.pixi\envs\default"
+          foreach ($d in @("Library\include", "pkgs", "Library\share\doc", "Library\lib\cmake")) { if (Test-Path "$Env\$d") { Remove-Item -Recurse -Force "$Env\$d" } }
+          Get-ChildItem -Recurse "$Env\Library\lib" -Filter *.lib | Remove-Item -Force
+          "环境大小 $([math]::Round((Get-ChildItem -Recurse -File $Env | Measure-Object Length -Sum).Sum / 1GB, 2)) GB"
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item -Recurse -Force "$env:GITHUB_WORKSPACE\kit\installer\*" out\
+          cmd /c mklink /J out\env "$Env" | Out-Null                       # 用安装包里的启动器、不经 pixi 跑一次，确认环境设对了
+          cmd /c "out\WenQuestCAD.cmd --cmd -c ""import FreeCAD,Part;print('LAUNCHER-OK', Part.makeBox(1,2,3).Volume)""" 2>&1 | Select-Object -Last 5
+          cmd /c rmdir out\env
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DEnvDir=$Env" "/DAppVersion=${{ inputs.version }}" "/Oout" out\wqcad.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup" }
+          Get-ChildItem out\*.exe | ForEach-Object { "$($_.Name) $([math]::Round($_.Length/1MB)) MB"; (Get-FileHash $_.FullName -Algorithm SHA256).Hash | Out-File "$($_.FullName).sha256" -Encoding ascii }
+          New-Item -ItemType File -Force "$env:GITHUB_WORKSPACE\kit\.done" | Out-Null
+      - name: 记“做完了”（后面的段跳过）
+        if: steps.build.outputs.finished == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: kit/.done
+          key: wqcad-done-${{ github.run_id }}
+      - name: 上传安装包
+        if: steps.build.outputs.finished == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wqcad-setup
+          path: out/*.exe*
+          retention-days: 30
+          compression-level: 0
+      - name: 发到 GitHub 发布版（测试版）
+        if: steps.build.outputs.finished == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v${{ inputs.version }}"
+          gh release create $tag --repo ${{ github.repository }} --prerelease --title "问渠 CAD ${{ inputs.version }}（测试版）" --notes "测试版：FreeCAD 1.1.4 + 27 个补丁 + AI 工作台（freecad-ai-parts ${{ inputs.ai_commit }}）。安装教程见问渠官网下载页。" (Get-ChildItem out\*.exe, out\*.sha256 | ForEach-Object FullName)

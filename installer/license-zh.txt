@@ -1,0 +1,8 @@
+﻿问渠 CAD 测试版 使用说明与许可
+
+1. 本软件是测试版，供注册用户试用，授权有效期一年；到期后可在问渠官网下载页续期或更新到新版本。
+2. 问渠 CAD 基于开源软件 FreeCAD（LGPL 2.1 或更高版本）和 Open CASCADE Technology（LGPL 2.1，带例外），并包含对它们的修正。
+   按 LGPL 的要求：这些修正的源代码可在 https://github.com/eddiezgq/wenquest-cad （patches 目录）取得；您可以用自己编译的同名库替换安装目录 env\Library\bin 下的 FreeCAD、OCCT 库。
+   其他随附的开源组件（Python、Qt、VTK、CalculiX、Gmsh 等）各自适用其原许可证，见 env 目录下各组件的许可证文件。
+3. 问渠自己的部分（AI 工作台、零件库、计算程序）版权归问渠所有，仅供您本人在授权期内使用，不得复制、转售或反向工程。
+4. 测试版按“现状”提供，计算结果须由使用者核对确认；AI 只起草，由人确认。示例数据为虚构示例。
