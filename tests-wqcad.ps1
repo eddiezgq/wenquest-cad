@@ -49,6 +49,22 @@ foreach ($f in Get-ChildItem (Join-Path $Kit "tests") -Filter *.py) {
     Step "  本书测试 $($f.BaseName)：$res（退出码 $code）"
 }
 
+# AI 设计零件回放（0.3c，约 5 分钟，不调用 AI）：工作台要先用 ai-wqcad.ps1 装好
+$AiLib = Join-Path $Src ".pixi\envs\default\Library\Mod\FreeCADAIParts\lib"
+if (Test-Path $AiLib) {
+    $env:WQCAD_AI_LIB = $AiLib
+    $env:WQCAD_OUT = Join-Path $Logs "ai-design.json"
+    $ccx = [Environment]::GetEnvironmentVariable("FAP_CCX", "User")
+    if ($ccx) { $env:FAP_CCX = $ccx }
+    $log = Join-Path $Logs "ai-design.log"
+    $code = Invoke-FreeCADCmd @("`"$(Join-Path $Kit "run_ai_design_test.py")`"") $log
+    $res = Get-Content $log, "$log.err" -ErrorAction SilentlyContinue | Select-String -Pattern "^WQCAD-AI-DESIGN " | ForEach-Object { $_.Line }
+    if (-not $res) { $res = "没有结果（见 $log）" }
+    Step "  AI 设计零件回放：$res（退出码 $code）"
+} else {
+    Step "  AI 设计零件回放：没装 AI 工作台，跳过（先运行 ai-wqcad.ps1）"
+}
+
 Step "3/3 启动器与桌面快捷方式"
 $Launcher = Join-Path $Root "WenQuestCAD.cmd"
 # pixi run 把命令里的反斜杠当转义符吃掉，所以传给它的路径一律用正斜杠

@@ -1,9 +1,9 @@
-﻿# 问渠 CAD 0.2a：把 freecad-ai-parts 的 AI Parts 工作台装进问渠 CAD（细则见 docs\细则-0.2.md）
+﻿# 问渠 CAD 0.2a / 0.3c：把 freecad-ai-parts 的 AI Parts 工作台装进问渠 CAD（细则见 docs\细则-0.2.md、docs\细则-0.3.md 的 0.3c）
 #   powershell -ExecutionPolicy Bypass -File .\ai-wqcad.ps1
 # 可重复运行。不调用 AI 模型，不读写密钥。
 param(
     [string]$Root = "C:\wqcad",
-    [string]$Commit = "1c0f05d5151134ad44af1028bf7b9152ad591a3f"
+    [string]$Commit = "c5cb1c278502e159bd2dc255806f377fa7366591"
 )
 
 $ErrorActionPreference = "Continue"
@@ -37,7 +37,7 @@ function Invoke-Env($exe, $argList, $log) {
     return $p.ExitCode
 }
 
-Step "1/4 取 freecad-ai-parts（固定提交 $($Commit.Substring(0,7))）"
+Step "1/5 取 freecad-ai-parts（固定提交 $($Commit.Substring(0,7))）"
 if (-not (Test-Path (Join-Path $Repo ".git"))) {
     git clone --no-checkout https://github.com/eddiezgq/freecad-ai-parts.git $Repo 2>&1 | Write-Host
     if (-not (Test-Path (Join-Path $Repo ".git"))) { Fail "git clone 失败（这个仓库是私有的，需要用你的 GitHub 账号登录）" }
@@ -52,13 +52,13 @@ $head = (git -C $Repo rev-parse HEAD).Trim()
 if ($head -ne $Commit) { Fail "切换到 $Commit 失败（现在是 $head）" }
 Step "  已在 $head"
 
-Step "2/4 用问渠 CAD 的 Python 装依赖（基本依赖 + 对话）"
+Step "2/5 用问渠 CAD 的 Python 装依赖（基本依赖 + 对话 + 网格）"
 $reqPy = Join-Path $Logs "ai-req.py"
 $req = Join-Path $Logs "ai-requirements.txt"
 $code = @"
 import sys, tomllib
 p = tomllib.load(open(sys.argv[1], 'rb'))['project']
-reqs = list(p['dependencies']) + list(p['optional-dependencies']['llm'])
+reqs = list(p['dependencies']) + list(p['optional-dependencies']['llm']) + list(p['optional-dependencies']['fea'])
 open(sys.argv[2], 'w', encoding='ascii').write('\n'.join(r.split('#')[0].strip() for r in reqs if r.strip()) + '\n')
 "@
 [IO.File]::WriteAllText($reqPy, $code, (New-Object Text.UTF8Encoding $false))
@@ -70,7 +70,22 @@ $rc = Invoke-Env $Py @("-m", "pip", "install", "--disable-pip-version-check", "-
 if ($rc -ne 0) { Fail "依赖安装失败（见 logs\ai-pip.log.err）" }
 Step "  依赖已装好"
 
-Step "3/4 把工作台装进问渠 CAD（$ModDir\FreeCADAIParts）"
+Step "3/5 检查 CalculiX（AI 设计零件算台阶圆角的应力集中要用，本机计算、不联网）"
+$ccx = $null
+$cands = @([Environment]::GetEnvironmentVariable("FAP_CCX", "User"), (Join-Path $PyEnv "Library\bin\ccx.exe"),
+           (Join-Path $env:USERPROFILE ".pixi\bin\ccx.exe"), (Join-Path $env:USERPROFILE ".pixi\bin\ccx.bat"))
+foreach ($c in $cands) { if ($c -and (Test-Path $c)) { $ccx = $c; break } }
+if (-not $ccx) {
+    Step "  没有找到，从 conda-forge 装 calculix（pixi global，单独的环境，不动问渠 CAD 的环境）"
+    & $Pixi global install calculix 2>&1 | Write-Host
+    foreach ($c in $cands[2..3]) { if (Test-Path $c) { $ccx = $c; break } }
+}
+if (-not $ccx) { Fail "装不上 CalculiX（ccx），把屏幕上的输出发给 Claude" }
+[Environment]::SetEnvironmentVariable("FAP_CCX", $ccx, "User")
+$env:FAP_CCX = $ccx
+Step "  CalculiX：$ccx（已记进用户环境变量 FAP_CCX）"
+
+Step "4/5 把工作台装进问渠 CAD（$ModDir\FreeCADAIParts）"
 $env:PYTHONPATH = $Repo
 $rc = Invoke-Env $Py @("-m", "freecad_addon.install", "--standalone", "--mod-dir", "`"$(Fwd $ModDir)`"") (Join-Path $Logs "ai-install.log")
 Remove-Item Env:\PYTHONPATH
@@ -78,7 +93,7 @@ $lib = Join-Path $ModDir "FreeCADAIParts\lib"
 if ($rc -ne 0 -or -not (Test-Path (Join-Path $ModDir "FreeCADAIParts\InitGui.py"))) { Fail "工作台安装失败（见 logs\ai-install.log 与 .err）" }
 Step "  已装好"
 
-Step "4/4 冒烟检查（不调用 AI 模型）"
+Step "5/5 冒烟检查（不调用 AI 模型）"
 $env:WQCAD_AI_LIB = $lib
 $env:WQCAD_OUT = Join-Path $Logs "ai-smoke.json"
 $smokeLog = Join-Path $Logs "ai-smoke.log"

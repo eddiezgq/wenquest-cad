@@ -34,10 +34,20 @@ try:
     good = sum(1 for r in runs if r["ok"])
     res["golden"] = f"{good}/{len(runs)}"
     res["golden_not_ok"] = [r["id"] for r in runs if not r["ok"]]
-    ok = bool(runs) and good == len(runs) and res["from_install_dir"] and res["init_gui"] and res["anthropic"]
+    # AI part design (plan 0.3c): local mesher and solver, plus the example and its recording shipped with the workbench
+    res["gmsh"] = __import__("importlib").util.find_spec("gmsh") is not None
+    from analysis.common.solvers import find_ccx
+
+    res["ccx"] = find_ccx()
+    res["ai_design_example"] = os.path.isfile(os.path.join(lib, "examples", "ai-design", "ls-upper-shaft", "requirement.txt"))
+    rec = os.path.join(lib, "tests", "recordings", "design")
+    res["ai_design_recordings"] = len(os.listdir(rec)) if os.path.isdir(rec) else 0
+    ok = (bool(runs) and good == len(runs) and res["from_install_dir"] and res["init_gui"] and res["anthropic"]
+          and res["gmsh"] and bool(res["ccx"]) and res["ai_design_example"] and res["ai_design_recordings"] > 0)
 except Exception:
     res["error"] = traceback.format_exc()
 res["ok"] = ok
 with open(out, "w", encoding="utf-8") as fh:
     json.dump(res, fh, ensure_ascii=False, indent=1)
-print("WQCAD-AI", "golden", res.get("golden"), "OK" if ok else "NOT OK")
+print("WQCAD-AI", "golden", res.get("golden"), "gmsh", res.get("gmsh"), "ccx", bool(res.get("ccx")),
+      "ai-design-example", res.get("ai_design_example"), "OK" if ok else "NOT OK")
