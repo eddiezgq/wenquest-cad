@@ -49,7 +49,7 @@ foreach ($f in Get-ChildItem (Join-Path $Kit "tests") -Filter *.py) {
     Step "  本书测试 $($f.BaseName)：$res（退出码 $code）"
 }
 
-# AI 设计零件回放（0.3c，约 5 分钟，不调用 AI）：工作台要先用 ai-wqcad.ps1 装好
+# AI 设计零件回放（0.3c、0.3d：平缝机上轴与关节空心轴，约 1 分钟，不调用 AI）：工作台要先用 ai-wqcad.ps1 装好
 $AiLib = Join-Path $Src ".pixi\envs\default\Library\Mod\FreeCADAIParts\lib"
 if (Test-Path $AiLib) {
     $env:WQCAD_AI_LIB = $AiLib

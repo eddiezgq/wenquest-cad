@@ -52,13 +52,14 @@ $head = (git -C $Repo rev-parse HEAD).Trim()
 if ($head -ne $Commit) { Fail "切换到 $Commit 失败（现在是 $head）" }
 Step "  已在 $head"
 
-Step "2/5 用问渠 CAD 的 Python 装依赖（基本依赖 + 对话 + 网格）"
+Step "2/5 用问渠 CAD 的 Python 装依赖（基本依赖 + 对话 + 网格 + 动力学）"
 $reqPy = Join-Path $Logs "ai-req.py"
 $req = Join-Path $Logs "ai-requirements.txt"
 $code = @"
 import sys, tomllib
 p = tomllib.load(open(sys.argv[1], 'rb'))['project']
 reqs = list(p['dependencies']) + list(p['optional-dependencies']['llm']) + list(p['optional-dependencies']['fea'])
+reqs += [r for r in p['optional-dependencies']['mbd'] if r.startswith('mujoco')]   # 关节空心轴的载荷由机器人动力学算（ADR-0100 42.5）
 open(sys.argv[2], 'w', encoding='ascii').write('\n'.join(r.split('#')[0].strip() for r in reqs if r.strip()) + '\n')
 "@
 [IO.File]::WriteAllText($reqPy, $code, (New-Object Text.UTF8Encoding $false))
