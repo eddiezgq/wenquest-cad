@@ -3,7 +3,7 @@
 # 可重复运行。不调用 AI 模型，不读写密钥。
 param(
     [string]$Root = "C:\wqcad",
-    [string]$Commit = "046826ad71859008d8b1025d16665f4b7b1b0598"
+    [string]$Commit = "9b524b4ed6d66fe65dc9c3167b18a32d135395ca"
 )
 
 $ErrorActionPreference = "Continue"
@@ -58,7 +58,7 @@ $req = Join-Path $Logs "ai-requirements.txt"
 $code = @"
 import sys, tomllib
 p = tomllib.load(open(sys.argv[1], 'rb'))['project']
-reqs = list(p['dependencies']) + list(p['optional-dependencies']['llm']) + list(p['optional-dependencies']['fea'])
+reqs = list(p['dependencies']) + list(p['optional-dependencies']['llm']) + list(p['optional-dependencies']['fea']) + list(p['optional-dependencies']['report'])   # report：出报告写 Word（11-20）
 reqs += [r for r in p['optional-dependencies']['mbd'] if r.startswith('mujoco')]   # 关节空心轴的载荷由机器人动力学算（ADR-0100 42.5）
 open(sys.argv[2], 'w', encoding='ascii').write('\n'.join(r.split('#')[0].strip() for r in reqs if r.strip()) + '\n')
 "@
