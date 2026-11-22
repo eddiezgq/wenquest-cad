@@ -60,4 +60,4 @@ jobs:
         run: |
           $tag = "v${{ inputs.version }}"
           gh release delete $tag --repo ${{ github.repository }} --yes --cleanup-tag 2>$null
-          gh release create $tag --repo ${{ github.repository }} --prerelease --title "问渠 CAD ${{ inputs.version }}（测试版）" --notes "修 ${{ inputs.tag }}：装好后启动报“no Qt platform plugin could be initialized”（Qt 配置写死了打包机路径）。程序内容与 ${{ inputs.tag }} 相同。安装教程见问渠官网下载页。" (Get-ChildItem out\*.exe, out\*.sha256 | ForEach-Object FullName)
+          gh release create $tag --repo ${{ github.repository }} --prerelease --title "问渠 CAD ${{ inputs.version }}（测试版）" --notes "修 ${{ inputs.tag }}：装好后启动报 no Qt platform plugin could be initialized（Qt 配置写死了打包机路径）。程序内容与 ${{ inputs.tag }} 相同。安装教程见问渠官网下载页。" (Get-ChildItem out\*.exe, out\*.sha256 | ForEach-Object FullName)
