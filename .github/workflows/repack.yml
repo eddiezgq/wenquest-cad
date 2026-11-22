@@ -1,0 +1,56 @@
+# 不重新编译，修一个已发布的问渠 CAD 安装包（11-22：qt6.conf 写死打包机路径，用户电脑上报
+# “no Qt platform plugin could be initialized”）：取发布版 → 静默装 → relocate.ps1 改 qt6.conf、换上新启动器
+# → 用装好的环境重新打包成新版本 → 装到别处真把界面打开 → 发布。手动运行。
+name: WenQuest CAD repack
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 原来的发布版标签
+        default: v0.3.0-beta
+      version:
+        description: 新版本号（安装包名、标签 v<版本>）
+        default: 0.3.0-beta.2
+permissions:
+  contents: write
+jobs:
+  repack:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: kit
+      - name: 取原安装包、装好
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" --pattern "*.exe" --dir pkg
+          $setup = (Get-ChildItem pkg -Filter *.exe | Select-Object -First 1).FullName
+          $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=C:\wq-src" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "安装失败 $($p.ExitCode)" }
+          if (-not (Test-Path "C:\wq-src\env\Library\bin\FreeCAD.exe")) { throw "装好的目录里没有 FreeCAD.exe" }
+      - name: 改路径、重新打包
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File kit\installer\relocate.ps1 -Env "C:\wq-src\env"
+          if ($LASTEXITCODE -ne 0) { throw "relocate" }
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item -Recurse -Force kit\installer\* out\
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DEnvDir=C:\wq-src\env" "/DAppVersion=${{ inputs.version }}" "/Oout" out\wqcad.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup" }
+          Get-ChildItem out\*.exe | ForEach-Object { "$($_.Name) $([math]::Round($_.Length/1MB)) MB"; (Get-FileHash $_.FullName -Algorithm SHA256).Hash | Out-File "$($_.FullName).sha256" -Encoding ascii }
+      - name: 装到别处，真把界面打开（原来装的藏起来）
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File kit\installer\gui-check.ps1 -Setup (Get-ChildItem out\*.exe | Select-Object -First 1).FullName -Dir "C:\wq-gui-check" -Hide "C:\wq-src"
+          if ($LASTEXITCODE -ne 0) { throw "界面打不开" }
+      - name: 发布（测试版）
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v${{ inputs.version }}"
+          gh release delete $tag --repo ${{ github.repository }} --yes --cleanup-tag 2>$null
+          gh release create $tag --repo ${{ github.repository }} --prerelease --title "问渠 CAD ${{ inputs.version }}（测试版）" --notes "修 ${{ inputs.tag }}：装好后启动报“no Qt platform plugin could be initialized”（Qt 配置写死了打包机路径）。程序内容与 ${{ inputs.tag }} 相同。安装教程见问渠官网下载页。" (Get-ChildItem out\*.exe, out\*.sha256 | ForEach-Object FullName)
