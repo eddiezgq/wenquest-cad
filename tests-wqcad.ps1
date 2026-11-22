@@ -49,7 +49,7 @@ foreach ($f in Get-ChildItem (Join-Path $Kit "tests") -Filter *.py) {
     Step "  本书测试 $($f.BaseName)：$res（退出码 $code）"
 }
 
-# AI 设计零件回放（0.3c、0.3d：平缝机上轴与关节空心轴，约 1 分钟，不调用 AI）：工作台要先用 ai-wqcad.ps1 装好
+# AI 设计零件回放（0.3c、0.3d：平缝机上轴与关节空心轴，约 1 分钟，不调用 AI）；再在界面里打开一次面板（约半分钟）：工作台要先用 ai-wqcad.ps1 装好
 $AiLib = Join-Path $Src ".pixi\envs\default\Library\Mod\FreeCADAIParts\lib"
 if (Test-Path $AiLib) {
     $env:WQCAD_AI_LIB = $AiLib
@@ -61,6 +61,25 @@ if (Test-Path $AiLib) {
     $res = Get-Content $log, "$log.err" -ErrorAction SilentlyContinue | Select-String -Pattern "^WQCAD-AI-DESIGN " | ForEach-Object { $_.Line }
     if (-not $res) { $res = "没有结果（见 $log）" }
     Step "  AI 设计零件回放：$res（退出码 $code）"
+    # 在问渠 CAD 界面里真的点一次“AI 设计零件”（用你自己的设置与布局）：卡住就到时间停掉、判不通过（0.3d，2026-11-19）
+    $env:WQCAD_OUT = Join-Path $Logs "gui-panel.json"
+    Remove-Item $env:WQCAD_OUT -ErrorAction SilentlyContinue
+    $log = Join-Path $Logs "gui-panel.log"
+    $a = @("run", "--frozen", "--manifest-path", "`"$($Manifest -replace '\\','/')`"", "`"$($Exe -replace '\\','/')`"", "`"$((Join-Path $Kit "run_gui_panel_test.py") -replace '\\','/')`"")
+    $p = Start-Process -FilePath $Pixi -ArgumentList $a -WorkingDirectory $Src -RedirectStandardOutput $log -RedirectStandardError "$log.err" -NoNewWindow -PassThru
+    if (-not $p.WaitForExit(120000)) {
+        & taskkill /T /F /PID $p.Id | Out-Null
+        Step "  AI 设计面板（界面）：120 秒没有结果，界面卡住了，已停掉 —— NOT OK（见 $log）"
+    } else {
+        # 界面程序的输出进的是报告视图，不一定到 $log：结果以脚本写的 json 为准
+        if (Test-Path $env:WQCAD_OUT) {
+            $j = Get-Content $env:WQCAD_OUT -Raw -Encoding UTF8 | ConvertFrom-Json
+            $ok = if ($j.ok) { "OK" } else { "NOT OK" }
+            Step "  AI 设计面板（界面）：panel $($j.panel) inside_screen $($j.inside_screen) responsive_ms $($j.responsive_ms) $ok $($j.error)"
+        } else {
+            Step "  AI 设计面板（界面）：没有结果（见 $log）—— NOT OK"
+        }
+    }
 } else {
     Step "  AI 设计零件回放：没装 AI 工作台，跳过（先运行 ai-wqcad.ps1）"
 }
