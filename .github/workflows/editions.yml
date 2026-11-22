@@ -1,0 +1,94 @@
+# 问渠有限元、问渠多体动力学 Windows 安装包（WenQuest 第 177 轮）：取 freecad-ai-parts 固定提交，
+# installer\windows\build.ps1 -Edition fea|mbd（正式构建，不加 -TestBuild：免费版功能直接可用，专业版要授权文件）。
+# 装好后检查文件、edition.json、能导入工作台，静默卸载干净，才发到本仓库的 GitHub 发布版（fea-v版本 / mbd-v版本）。
+name: WenQuest FEA / MBD installers
+on:
+  workflow_dispatch:
+    inputs:
+      ai_commit:
+        description: freecad-ai-parts 提交
+        default: "55e4658eecc96716debf43a1cc4ac99122c6eba3"
+      editions:
+        description: 打哪几个（逗号分开）
+        default: "fea,mbd"
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: [fea, mbd]
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - name: Skip?
+        id: go
+        shell: bash
+        run: echo "run=$([[ ",${{ inputs.editions }}," == *",${{ matrix.edition }},"* ]] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+      - name: 取 freecad-ai-parts（不含 factory/）
+        if: steps.go.outputs.run == 'yes'
+        shell: bash
+        run: |
+          mkdir fap && cd fap
+          git init -q .
+          git config core.protectNTFS false
+          git remote add origin https://github.com/eddiezgq/freecad-ai-parts
+          git sparse-checkout set --no-cone '/*' '!/factory/'
+          git fetch -q --depth 1 origin "${{ inputs.ai_commit }}"
+          git checkout -q FETCH_HEAD
+          git log --oneline -1
+      - name: 缓存 FreeCAD 便携版
+        if: steps.go.outputs.run == 'yes'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\fap-win\FreeCAD_1.0.2-conda-Windows-x86_64-py311.7z
+          key: freecad-win-1.0.2
+      - name: 打包
+        if: steps.go.outputs.run == 'yes'
+        shell: cmd
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          cd fap
+          powershell -NoProfile -ExecutionPolicy Bypass -File installer\windows\build.ps1 -Work "%RUNNER_TEMP%\fap-win" -Out "%GITHUB_WORKSPACE%\out" -Edition ${{ matrix.edition }} > "%RUNNER_TEMP%\build.log" 2>&1
+          set rc=%ERRORLEVEL%
+          powershell -NoProfile -Command "Get-Content $env:RUNNER_TEMP\build.log -Tail 60"
+          exit /b %rc%
+      - name: 静默安装、检查、卸载
+        if: steps.go.outputs.run == 'yes'
+        shell: pwsh
+        run: |
+          $e = "${{ matrix.edition }}"
+          $setup = (Get-ChildItem out -Filter "WenQuest-*-Setup-*.exe" | Select-Object -First 1).FullName
+          if (-not $setup) { throw "没有安装包" }
+          $dir = "C:\wq-$e-check"
+          $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$dir", "/LOG=$env:RUNNER_TEMP\setup.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\setup.log" -Tail 30; throw "安装失败 $($p.ExitCode)" }
+          foreach ($f in @("bin\FreeCAD.exe", "Mod\FreeCADAIParts\InitGui.py", "Mod\FreeCADAIParts\lib\edition.json", "NOTICES.txt")) {
+            if (-not (Test-Path (Join-Path $dir $f))) { throw "安装目录里没有 $f" }
+          }
+          $ed = Get-Content "$dir\Mod\FreeCADAIParts\lib\edition.json" -Raw | ConvertFrom-Json
+          Write-Host "edition.json: $($ed | ConvertTo-Json -Compress)"
+          if ($ed.edition -ne $e -or $ed.test_build) { throw "edition.json 不对" }
+          $lib = "$dir\Mod\FreeCADAIParts\lib"
+          $mod = if ($e -eq "fea") { "assist.fea_edition" } else { "assist.mbd_edition" }
+          & "$dir\bin\python.exe" -c "import sys; sys.path.insert(0, r'$lib'); import importlib; m = importlib.import_module('$mod'); print('import ok', m.__name__)"
+          if ($LASTEXITCODE -ne 0) { throw "导入工作台失败" }
+          $u = Start-Process -FilePath "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+          Start-Sleep -Seconds 5
+          if ($u.ExitCode -ne 0 -or (Test-Path "$dir\bin\FreeCAD.exe")) { throw "卸载没有清干净" }
+          Get-ChildItem out\*.exe | ForEach-Object { $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(); "$h  $($_.Name)" | Set-Content -Encoding ascii "$($_.FullName).sha256"; Write-Host "$h $($_.Name) $([math]::Round($_.Length/1MB,1)) MB" }
+      - name: 发到 GitHub 发布版（测试版）
+        if: steps.go.outputs.run == 'yes'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $e = "${{ matrix.edition }}"
+          $exe = Get-ChildItem out -Filter "WenQuest-*-Setup-*.exe" | Select-Object -First 1
+          $ver = $exe.BaseName -replace '^WenQuest-[A-Z]+-Setup-', ''
+          $tag = "$e-v$ver-beta"
+          $name = if ($e -eq "fea") { "问渠有限元 WenQuest FEA" } else { "问渠多体动力学 WenQuest MBD" }
+          gh release delete $tag --repo ${{ github.repository }} --yes --cleanup-tag 2>$null
+          gh release create $tag --repo ${{ github.repository }} --prerelease --title "$name $ver（测试版）" --notes "测试版：FreeCAD 1.0.2 + freecad-ai-parts ${{ inputs.ai_commit }}（-Edition $e）。免费版功能直接可用，专业版功能暂不开放。安装教程见问渠官网下载页。" $exe.FullName "$($exe.FullName).sha256"
