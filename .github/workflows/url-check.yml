@@ -1,0 +1,27 @@
+# 从外网看一眼网页、下载地址（本会话的环境连不到外网网站）：列出 HTTP 状态、大小、页面里的版本号。手动运行。
+name: URL check
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: 空格分开的网址
+        required: true
+      grep:
+        description: 页面里要找的文字（正则）
+        default: "0\\.3\\.0-beta[.0-9]*"
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 看
+        env:
+          URLS: ${{ inputs.urls }}
+          PAT: ${{ inputs.grep }}
+        run: |
+          for u in $URLS; do
+            echo "== $u"
+            curl -sL -o page.bin -w 'status %{http_code}  size %{size_download}  final %{url_effective}\n' --max-time 60 -r 0-2000000 "$u" || echo "curl failed"
+            grep -aoE "$PAT" page.bin | sort | uniq -c | head -20 || true
+          done
