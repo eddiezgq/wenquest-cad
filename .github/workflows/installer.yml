@@ -7,7 +7,7 @@ on:
     inputs:
       ai_commit:
         description: "freecad-ai-parts 固定提交（同 ai-wqcad.ps1）"
-        default: "9b524b4ed6d66fe65dc9c3167b18a32d135395ca"
+        default: "de568e6772165204f6643b87a007842c25dbdffa"
       version:
         description: "测试版版本号"
         default: "0.3.1-beta"
@@ -155,7 +155,10 @@ jobs:
           $env:WQCAD_OUT = "$env:RUNNER_TEMP\ai-e2e.json"
           $e2e = pixi run .pixi/envs/default/Library/bin/FreeCADCmd.exe "$env:GITHUB_WORKSPACE/kit/run_ai_e2e.py" 2>&1 | Out-String
           $e2e.Split("`n") | Select-Object -Last 25
-          if ($e2e -notmatch "WQCAD-AI-E2E .* OK" -or $e2e -match "NOT OK") { Get-Content $env:WQCAD_OUT -ErrorAction SilentlyContinue; throw "AI 工作台端到端检查没过" }
+          # 11-22：结论看它写的 JSON（FreeCADCmd 跑脚本时 print 不一定进标准输出，0.3.1 第一次出包就因此误判）
+          $res = if (Test-Path $env:WQCAD_OUT) { Get-Content $env:WQCAD_OUT -Raw | ConvertFrom-Json } else { $null }
+          if (-not $res -or -not $res.ok) { Get-Content $env:WQCAD_OUT -ErrorAction SilentlyContinue; throw "AI 工作台端到端检查没过" }
+          "AI 端到端：ok"
       - name: 瘦身、写启动器、打安装包
         if: steps.build.outputs.finished == 'true'
         shell: pwsh
