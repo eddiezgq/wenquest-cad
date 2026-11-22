@@ -1,0 +1,74 @@
+# 装好以后真把界面打开（11-22 Eddie：问渠有限元装好后报 “no Qt platform plugin could be initialized”）。
+# 从本仓库 GitHub 发布版取安装包，静默安装，启动 FreeCAD.exe 跑一个小宏（写一个文件就退出）；
+# 打不开就把 Qt 插件目录、qt.conf、环境变量列出来。手动运行。
+name: GUI start check
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 发布版标签（fea-v0.0.1-beta / mbd-v0.0.1-beta / v0.3.0-beta）
+        default: fea-v0.0.1-beta
+      dir:
+        description: 装到哪里（空 = 安装包默认目录）
+        default: ""
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - name: 取安装包
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" --pattern "*.exe" --dir pkg && ls -l pkg
+      - name: 安装、启动、诊断
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem pkg -Filter *.exe | Select-Object -First 1).FullName
+          $sargs = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$env:RUNNER_TEMP\setup.log")
+          if ("${{ inputs.dir }}") { $sargs += "/DIR=${{ inputs.dir }}" }
+          $p = Start-Process -FilePath $setup -ArgumentList $sargs -Wait -PassThru
+          Write-Host "setup exit $($p.ExitCode)"
+          $dir = "${{ inputs.dir }}"
+          if (-not $dir) { $dir = @("WenQuestCAD", "WenQuest FEA", "WenQuest MBD") | ForEach-Object { Join-Path $env:ProgramFiles $_ } | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+          Write-Host "app dir: $dir"
+          $bin = Join-Path $dir "bin"
+          if (Test-Path "$dir\WenQuestCAD.cmd") {        # 问渠 CAD：启动器里设的环境照样设
+            $cp = "$dir\env"; $bin = "$cp\Library\bin"
+            $env:CONDA_PREFIX = $cp; $env:PYTHONHOME = $cp; $env:PYTHONUTF8 = "1"
+            $env:PATH = "$cp;$cp\Library\mingw-w64\bin;$cp\Library\usr\bin;$cp\Library\bin;$cp\Scripts;$cp\bin;$env:PATH"
+            Write-Host "--- WenQuestCAD.cmd"; Get-Content "$dir\WenQuestCAD.cmd"
+          }
+          Write-Host "--- qt.conf"; Get-ChildItem $dir -Recurse -Include qt.conf,qt6.conf,qt5.conf | ForEach-Object { Write-Host $_.FullName; Get-Content $_.FullName }
+          Write-Host "--- qwindows.dll"; Get-ChildItem $dir -Recurse -Filter "qwindows*.dll" | ForEach-Object { Write-Host $_.FullName }
+          Write-Host "--- Qt core dll"; Get-ChildItem $dir -Recurse -Include "Qt5Core*.dll","Qt6Core*.dll" | ForEach-Object { Write-Host $_.FullName }
+          Write-Host "--- QT env"; Get-ChildItem env: | Where-Object Name -like "QT*" | Format-Table -AutoSize | Out-String | Write-Host
+          $flag = "$env:RUNNER_TEMP\gui_ok.txt"
+          $macro = "$env:RUNNER_TEMP\guicheck.FCMacro"
+          @"
+          import FreeCAD, FreeCADGui
+          from PySide import QtCore
+          def done():
+              open(r'$flag', 'w').write('ok ' + FreeCAD.Version()[0] + '.' + FreeCAD.Version()[1] + ' ' + str(FreeCADGui.getMainWindow() is not None))
+              FreeCADGui.getMainWindow().close()
+          QtCore.QTimer.singleShot(8000, done)
+          "@ | Set-Content -Encoding utf8 $macro
+          $fc = Start-Process -FilePath "$bin\FreeCAD.exe" -ArgumentList "`"$macro`"" -WorkingDirectory $bin -PassThru `
+                -RedirectStandardOutput "$env:RUNNER_TEMP\fc_out.txt" -RedirectStandardError "$env:RUNNER_TEMP\fc_err.txt"
+          $t = 0; while (-not (Test-Path $flag) -and -not $fc.HasExited -and $t -lt 240) { Start-Sleep 2; $t += 2 }
+          Start-Sleep 3
+          Write-Host "--- stdout"; Get-Content "$env:RUNNER_TEMP\fc_out.txt" -Tail 40 -ErrorAction SilentlyContinue
+          Write-Host "--- stderr"; Get-Content "$env:RUNNER_TEMP\fc_err.txt" -Tail 40 -ErrorAction SilentlyContinue
+          if (-not $fc.HasExited) { Stop-Process -Id $fc.Id -Force }
+          if (Test-Path $flag) { Write-Host "GUI OK: $(Get-Content $flag)" } else {
+            Write-Host "--- 带 QT_DEBUG_PLUGINS 再试一次"
+            $env:QT_DEBUG_PLUGINS = "1"
+            $fc = Start-Process -FilePath "$bin\FreeCAD.exe" -ArgumentList "`"$macro`"" -WorkingDirectory $bin -PassThru `
+                  -RedirectStandardOutput "$env:RUNNER_TEMP\fc_out2.txt" -RedirectStandardError "$env:RUNNER_TEMP\fc_err2.txt"
+            Start-Sleep 40
+            if (-not $fc.HasExited) { Stop-Process -Id $fc.Id -Force }
+            Get-Content "$env:RUNNER_TEMP\fc_err2.txt" -Tail 80 -ErrorAction SilentlyContinue
+            throw "界面没打开"
+          }
