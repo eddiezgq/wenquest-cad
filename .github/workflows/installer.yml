@@ -179,7 +179,7 @@ jobs:
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DEnvDir=$Env" "/DAppVersion=${{ inputs.version }}" "/Oout" out\wqcad.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup" }
           # 11-22：装到别处、把打包机上的环境藏起来，真把界面打开
-          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE\kit\installer\gui-check.ps1" -Setup (Get-ChildItem out\*.exe | Select-Object -First 1).FullName -Dir "C:\wq-gui-check" -Hide "$env:ROOT\FreeCAD\.pixi"
+          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE\kit\installer\gui-check.ps1" -Setup (Get-ChildItem out\*.exe | Select-Object -First 1).FullName -Dir "C:\wq-gui-check" -Hide "$env:ROOT\FreeCAD\.pixi" -SoftGL
           if ($LASTEXITCODE -ne 0) { throw "装好后界面打不开" }
           Get-ChildItem out\*.exe | ForEach-Object { "$($_.Name) $([math]::Round($_.Length/1MB)) MB"; (Get-FileHash $_.FullName -Algorithm SHA256).Hash | Out-File "$($_.FullName).sha256" -Encoding ascii }
           New-Item -ItemType File -Force "$env:GITHUB_WORKSPACE\kit\.done" | Out-Null

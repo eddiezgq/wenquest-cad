@@ -4,7 +4,8 @@
 param(
   [Parameter(Mandatory = $true)][string]$Setup,
   [string]$Dir = "",
-  [string]$Hide = ""
+  [string]$Hide = "",
+  [switch]$SoftGL          # GitHub 的 Windows 机器没有显卡驱动（只有 OpenGL 1.1）：检查时临时放 Mesa 软件渲染，查完删掉
 )
 $ErrorActionPreference = "Stop"
 $sargs = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$env:RUNNER_TEMP\gui-setup.log")
@@ -25,6 +26,20 @@ if (Test-Path "$Dir\WenQuestCAD.cmd") {          # 问渠 CAD：照启动器设�
 }
 Get-ChildItem $Dir -Recurse -Include qt.conf, qt6.conf, qt5.conf -ErrorAction SilentlyContinue | ForEach-Object {
   Write-Host "--- $($_.FullName)"; Get-Content $_.FullName | Select-Object -First 4 | ForEach-Object { Write-Host "  $_" }
+}
+$added = @()
+if ($SoftGL) {
+  $h = @{}; if ($env:GH_TOKEN) { $h.Authorization = "Bearer $env:GH_TOKEN" }
+  $rel = Invoke-RestMethod -Headers $h https://api.github.com/repos/pal1000/mesa-dist-win/releases/latest
+  $a = $rel.assets | Where-Object { $_.name -match '^mesa3d-.*-release-msvc\.7z$' } | Select-Object -First 1
+  if (-not $a) { throw "没找到 Mesa 软件渲染包" }
+  $z = "$env:RUNNER_TEMP\mesa.7z"; Invoke-WebRequest -UseBasicParsing $a.browser_download_url -OutFile $z
+  & 7z x $z "-o$env:RUNNER_TEMP\mesa" -y | Out-Null
+  foreach ($f in Get-ChildItem "$env:RUNNER_TEMP\mesa\x64" -Filter *.dll) {
+    if (-not (Test-Path (Join-Path $bin $f.Name))) { Copy-Item $f.FullName $bin; $added += (Join-Path $bin $f.Name) }
+  }
+  $env:GALLIUM_DRIVER = "llvmpipe"
+  Write-Host "临时放了 Mesa（$($a.name)）：$($added.Count) 个 dll"
 }
 $hidden = $null
 if ($Hide -and (Test-Path $Hide)) { $hidden = "$Hide.hidden-for-gui-check"; Rename-Item $Hide $hidden; Write-Host "暂时藏起：$Hide" }
@@ -52,4 +67,5 @@ try {
   Write-Host "界面打开了：$(Get-Content $flag)"
 } finally {
   if ($hidden) { Rename-Item $hidden (Split-Path $Hide -Leaf); Write-Host "已放回：$Hide" }
+  foreach ($f in $added) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
 }

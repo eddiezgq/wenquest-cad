@@ -44,7 +44,7 @@ jobs:
       - name: 装到别处，真把界面打开（原来装的藏起来）
         shell: pwsh
         run: |
-          & pwsh -NoProfile -File kit\installer\gui-check.ps1 -Setup (Get-ChildItem out\*.exe | Select-Object -First 1).FullName -Dir "C:\wq-gui-check" -Hide "C:\wq-src"
+          & pwsh -NoProfile -File kit\installer\gui-check.ps1 -Setup (Get-ChildItem out\*.exe | Select-Object -First 1).FullName -Dir "C:\wq-gui-check" -Hide "C:\wq-src" -SoftGL
           if ($LASTEXITCODE -ne 0) { throw "界面打不开" }
       - name: 发布（测试版）
         shell: pwsh
