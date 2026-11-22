@@ -46,6 +46,13 @@ jobs:
         run: |
           & pwsh -NoProfile -File kit\installer\gui-check.ps1 -Setup (Get-ChildItem out\*.exe | Select-Object -First 1).FullName -Dir "C:\wq-gui-check" -Hide "C:\wq-src" -SoftGL
           if ($LASTEXITCODE -ne 0) { throw "界面打不开" }
+      - name: 打不开时的截图
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-fail
+          path: ${{ runner.temp }}/gui-fail.png
+          if-no-files-found: ignore
       - name: 发布（测试版）
         shell: pwsh
         env:

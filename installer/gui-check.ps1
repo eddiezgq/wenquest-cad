@@ -61,11 +61,25 @@ try {
   $t = 0
   while (-not (Test-Path $flag) -and -not $fc.HasExited -and $t -lt 300) { Start-Sleep 2; $t += 2 }
   Start-Sleep 3
-  if (-not $fc.HasExited) { Stop-Process -Id $fc.Id -Force -ErrorAction SilentlyContinue }
   Write-Host "--- stderr"; Get-Content "$env:RUNNER_TEMP\fc_err.txt" -Tail 30 -ErrorAction SilentlyContinue
-  if (-not (Test-Path $flag)) { throw "界面没打开（$t 秒）" }
+  if (-not (Test-Path $flag)) {
+    # 打不开：截个屏、列出窗口标题（多半是有对话框挡住了），工作流把截图存成附件
+    $wins = Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { "$($_.ProcessName): $($_.MainWindowTitle)" }
+    Write-Host "--- 窗口"; $wins | ForEach-Object { Write-Host "  $_" }
+    Write-Host "--- stdout"; Get-Content "$env:RUNNER_TEMP\fc_out.txt" -Tail 30 -ErrorAction SilentlyContinue
+    try {
+      Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+      $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+      $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+      [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+      $bmp.Save("$env:RUNNER_TEMP\gui-fail.png")
+      Write-Host "截图：$env:RUNNER_TEMP\gui-fail.png"
+    } catch { Write-Host "截图失败：$_" }
+    throw "界面没打开（$t 秒）"
+  }
   Write-Host "界面打开了：$(Get-Content $flag)"
 } finally {
+  if ($fc -and -not $fc.HasExited) { Stop-Process -Id $fc.Id -Force -ErrorAction SilentlyContinue; Start-Sleep 2 }
   if ($hidden) { Rename-Item $hidden (Split-Path $Hide -Leaf); Write-Host "已放回：$Hide" }
   foreach ($f in $added) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
 }
