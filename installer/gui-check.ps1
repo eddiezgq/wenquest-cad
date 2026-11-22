@@ -59,7 +59,17 @@ try {
   $fc = Start-Process -FilePath "$bin\FreeCAD.exe" -ArgumentList "`"$macro`"" -WorkingDirectory $bin -PassThru `
         -RedirectStandardOutput "$env:RUNNER_TEMP\fc_out.txt" -RedirectStandardError "$env:RUNNER_TEMP\fc_err.txt"
   $t = 0
-  while (-not (Test-Path $flag) -and -not $fc.HasExited -and $t -lt 300) { Start-Sleep 2; $t += 2 }
+  Add-Type -AssemblyName Microsoft.VisualBasic, System.Windows.Forms
+  $lic = $false
+  while (-not (Test-Path $flag) -and -not $fc.HasExited -and $t -lt 300) {
+    Start-Sleep 2; $t += 2
+    $title = (Get-Process -Id $fc.Id -ErrorAction SilentlyContinue).MainWindowTitle
+    if ($title -like "*WenQuest licence*") {     # 问渠 CAD 没有授权时启动会问授权码：说明界面已经起来了；按 Esc 跳过，接着启动
+      if (-not $lic) { Write-Host "启动时弹出授权对话框（$t 秒）：界面已起来，按 Esc 跳过" }
+      $lic = $true
+      try { [Microsoft.VisualBasic.Interaction]::AppActivate($fc.Id) | Out-Null; Start-Sleep 1; [System.Windows.Forms.SendKeys]::SendWait("{ESC}") } catch { Write-Host "按键失败：$_" }
+    }
+  }
   Start-Sleep 3
   Write-Host "--- stderr"; Get-Content "$env:RUNNER_TEMP\fc_err.txt" -Tail 30 -ErrorAction SilentlyContinue
   if (-not (Test-Path $flag)) {
