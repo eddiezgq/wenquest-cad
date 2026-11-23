@@ -26,19 +26,21 @@ def state(o):
     return list(o.State)
 
 
-if mark("ch18"):
-    # ch18 / ch42：圆角半径太大
+if mark("ch18a"):
     b = Part.makeBox(20, 20, 20)
     try:
         s = b.makeFillet(12, b.Edges)
         out["fillet12_part_api"] = {"valid": s.isValid(), "volume": round(s.Volume, 1)}
     except Exception as e:  # noqa: BLE001
         out["fillet12_part_api"] = "ERR " + str(e)[:160]
+if mark("ch18b"):
+    b = Part.makeBox(20, 20, 20)
     try:
         b.makeFillet(10, b.Edges)
         out["fillet10_msg"] = "ok"
     except Exception as e:  # noqa: BLE001
         out["fillet10_msg"] = str(e)[:160]
+if mark("ch18c"):
     doc = App.newDocument("f")
     body = doc.addObject("PartDesign::Body", "Body")
     bx = body.newObject("PartDesign::AdditiveBox", "Box")
@@ -46,13 +48,11 @@ if mark("ch18"):
     doc.recompute()
     fl = body.newObject("PartDesign::Fillet", "Fillet")
     fl.Base = (bx, [f"Edge{i}" for i in range(1, 13)])
-    fl.Radius = 12
+    fl.Radius = float(os.environ.get("PROBE20_R", "12"))
     doc.recompute()
-    out["pd_fillet12"] = {"state": state(fl), "null": fl.Shape.isNull(),
-                          "valid": None if fl.Shape.isNull() else fl.Shape.isValid(),
-                          "volume": None if fl.Shape.isNull() else round(fl.Shape.Volume, 1),
-                          "tip_volume": round(body.Shape.Volume, 1) if not body.Shape.isNull() else None}
-
+    out["pd_fillet"] = {"r": fl.Radius.Value, "state": state(fl), "null": fl.Shape.isNull(),
+                        "valid": None if fl.Shape.isNull() else fl.Shape.isValid(),
+                        "volume": None if fl.Shape.isNull() else round(fl.Shape.Volume, 1)}
 if mark("ch20"):
     # ch20：螺旋节距太小（截面圆 ⌀4，节距 3）
     doc = App.newDocument("h")

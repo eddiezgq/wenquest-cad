@@ -15,7 +15,7 @@ on:
         default: acceptance/lesson20_probe.py
       sections:
         description: 分段（空格分开；空 = 整个脚本一次跑）
-        default: "ch18 ch20 ch21 ch22 ch28 ch33"
+        default: "ch18a ch18b ch18c ch20 ch21 ch22 ch28 ch33"
       minutes:
         description: 每段限时（分钟）
         default: "6"
@@ -49,17 +49,18 @@ jobs:
           $s = (Resolve-Path "${{ inputs.script }}").Path
           $secs = "${{ inputs.sections }}".Split(" ", [StringSplitOptions]::RemoveEmptyEntries); if (-not $secs) { $secs = @("") }
           $who = @(@{ name = "WQCAD"; cmd = "C:\wq\WenQuestCAD.cmd --cmd" })
-          if (Test-Path fc_cmd.txt) { $who += @{ name = "FREECAD"; cmd = "`"$((Get-Content fc_cmd.txt).Trim())`"" } }
+          if (Test-Path fc_cmd.txt) { $who += @{ name = "FREECAD"; exe = (Get-Content fc_cmd.txt).Trim() } }
           foreach ($w in $who) {
             foreach ($sec in $secs) {
               $env:PROBE20_ONLY = $sec
               $log = "out-$($w.name)-$sec.txt"
               $t0 = Get-Date
-              $p = Start-Process -FilePath cmd.exe -ArgumentList "/c", "$($w.cmd) ""$s"" > $log 2>&1" -NoNewWindow -PassThru
+              if ($w.name -eq "WQCAD") { $p = Start-Process -FilePath cmd.exe -ArgumentList "/c", "$($w.cmd) ""$s"" > $log 2>&1" -NoNewWindow -PassThru }
+              else { $p = Start-Process -FilePath $w.exe -ArgumentList "`"$s`"" -RedirectStandardOutput $log -RedirectStandardError "$log.err" -NoNewWindow -PassThru }
               $done = $p.WaitForExit([int]"${{ inputs.minutes }}" * 60000)
               $sec_t = [math]::Round(((Get-Date) - $t0).TotalSeconds)
               if (-not $done) { Get-Process | Where-Object { $_.ProcessName -like "FreeCAD*" } | Stop-Process -Force; Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
-              $lines = Get-Content $log -ErrorAction SilentlyContinue | Select-String -Pattern "PROBE20|Exception|Traceback" | ForEach-Object { $_.Line }
+              $lines = Get-Content $log, "$log.err" -ErrorAction SilentlyContinue | Select-String -Pattern "PROBE20|Exception|Traceback" | ForEach-Object { $_.Line }
               Write-Host "== $($w.name) $sec  $(if ($done) { "$sec_t s" } else { "超时（$sec_t s）" })"
               $lines | ForEach-Object { Write-Host "   $_" }
             }
