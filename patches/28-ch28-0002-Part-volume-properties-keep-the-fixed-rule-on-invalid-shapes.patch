@@ -1,0 +1,33 @@
+From bd1828a55be328bc144f2ae9523ed9f0ff7dbc5b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 22 Nov 2026 21:00:11 -0500
+Subject: [PATCH] Part: volume properties keep the fixed rule on invalid shapes
+
+The adaptive Gauss / Gauss-Kronrod rules added for NURBS accuracy (book ch28) never
+finished on an invalid solid such as a box filleted with a radius larger than half its
+edge (Part.makeBox(20,20,20).makeFillet(12, edges): official FreeCAD reports a volume
+of -8.3e10 in seconds, the patched build hung for more than 15 minutes). An invalid
+solid has no meaningful volume; use the bounded fixed-order rule there.
+---
+ src/Mod/Part/App/TopoShape.cpp | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/Mod/Part/App/TopoShape.cpp b/src/Mod/Part/App/TopoShape.cpp
+index 3990721..fd64716 100644
+--- a/src/Mod/Part/App/TopoShape.cpp
++++ b/src/Mod/Part/App/TopoShape.cpp
+@@ -1214,7 +1214,10 @@ void TopoShape::volumeProperties(const TopoDS_Shape& shape, GProp_GProps& props,
+                 elementary = false;
+         }
+     }
+-    if (elementary) {
++    // An invalid solid (e.g. a fillet the kernel "succeeded" with, volume of the wrong sign or
++    // orders of magnitude off) has no meaningful volume, and the adaptive rules below can refine
++    // forever on it: the GUI hung on such a shape. Keep the fixed rule there (bounded time).
++    if (elementary || !BRepCheck_Analyzer(shape).IsValid()) {
+         BRepGProp::VolumeProperties(shape, props);
+         return;
+     }
+-- 
+2.43.0
+

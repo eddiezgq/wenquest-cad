@@ -59,6 +59,17 @@ class BookRegressionTests(unittest.TestCase):
         izz = s.MatrixOfInertia.A33
         self.assertLess(abs(izz - 0.4 * m * 100) / (0.4 * m * 100), 1e-6)
 
+    def test_volume_of_invalid_fillet_returns(self):
+        # chapter 28 (0002): the accurate integration must not run on an invalid solid; a box
+        # filleted with a radius above half its edge used to hang Volume for more than 15 minutes
+        import time
+        box = Part.makeBox(20, 20, 20)
+        bad = box.makeFillet(12, box.Edges)
+        self.assertFalse(bad.isValid())
+        t = time.time()
+        bad.Volume
+        self.assertLess(time.time() - t, 30.0)
+
     def test_multifuse_does_not_depend_on_order(self):
         # chapter 29: a fusion is commutative; reordering Shapes must not change the result
         doc = App.newDocument("BookMultiFuseOrder")

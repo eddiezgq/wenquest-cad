@@ -25,3 +25,4 @@
 25-ch40-0001-Part-BSplineSurface-approximate-interpolate-reject-ragged-point-grids.patch	book ch40/0001: Part-BSplineSurface-approximate-interpolate-reject-ragged-point-grids
 26-ch42-0001-Part-error-messages-name-the-exception-class-and-the-failed-fillet-or-chamfer.patch	book ch42/0001: Part-error-messages-name-the-exception-class-and-the-failed-fillet-or-chamfer
 27-ch43-0001-Part-sewShape-uses-its-tolerance-and-check-reports-statuses-in-context.patch	book ch43/0001: Part-sewShape-uses-its-tolerance-and-check-reports-statuses-in-context
+28-ch28-0002-Part-volume-properties-keep-the-fixed-rule-on-invalid-shapes.patch	book ch28/0002: Part-volume-properties-keep-the-fixed-rule-on-invalid-shapes
