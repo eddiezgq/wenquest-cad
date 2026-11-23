@@ -1,0 +1,30 @@
+# 从外网验收问渠 CAD 网页帮助（细则-帮助与培训 第十三节第 1 件）：两个站、中英文、电脑和手机宽度。手动运行。
+name: Help check
+on:
+  workflow_dispatch:
+    inputs:
+      pages:
+        description: 空格分开的帮助页网址
+        default: >-
+          https://learn.wenquestrobotics.com/static/help/wqcad/index.html
+          https://learn.wenquestrobotics.com/static/help/wqcad/en/index.html
+          https://learn.wenquestech.online/static/help/wqcad/index.html
+          https://learn.wenquestech.online/static/help/wqcad/en/index.html
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm i --no-save playwright@1.48.2 && npx playwright install --with-deps chromium
+      - name: 看
+        env:
+          PAGES: ${{ inputs.pages }}
+        run: node tools/help_check.mjs $PAGES
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: help-check
+          path: out/
