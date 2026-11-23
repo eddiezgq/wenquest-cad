@@ -26,3 +26,4 @@
 26-ch42-0001-Part-error-messages-name-the-exception-class-and-the-failed-fillet-or-chamfer.patch	book ch42/0001: Part-error-messages-name-the-exception-class-and-the-failed-fillet-or-chamfer
 27-ch43-0001-Part-sewShape-uses-its-tolerance-and-check-reports-statuses-in-context.patch	book ch43/0001: Part-sewShape-uses-its-tolerance-and-check-reports-statuses-in-context
 28-ch28-0002-Part-volume-properties-keep-the-fixed-rule-on-invalid-shapes.patch	book ch28/0002: Part-volume-properties-keep-the-fixed-rule-on-invalid-shapes
+29-ch20-0002-PartDesign-Helix-self-intersection-check-uses-the-current-axis.patch	book ch20/0002: PartDesign-Helix-self-intersection-check-uses-the-current-axis

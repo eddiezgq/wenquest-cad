@@ -106,7 +106,8 @@ jobs:
           done
           ls "$E/lib/qt6/plugins/platforms" | head
           "$E/bin/FreeCADCmd" -c "import FreeCAD,Part;print('LINUX-OK', FreeCAD.Version()[:3], Part.makeBox(1,2,3).Volume)"
-          "$E/bin/FreeCADCmd" "$GITHUB_WORKSPACE/kit/tests/book_regression_tests.py" 2>&1 | tail -5 || true
+          cp "$GITHUB_WORKSPACE/kit/tests/book_regression_tests.py" /tmp/
+          "$E/bin/FreeCADCmd" -c "import sys, unittest; sys.path.insert(0, '/tmp'); import book_regression_tests as t; r = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromModule(t)); print('BOOK-TESTS', 'OK' if r.wasSuccessful() else 'FAILED')" 2>&1 | tail -15
           rm -rf "$E/include" "$E/pkgs" "$E/share/doc" "$E/lib/cmake" "$E/conda-meta"
           find "$E" -name "*.a" -delete; find "$E" -name __pycache__ -type d -prune -exec rm -rf {} +
           du -sh "$E"

@@ -1,0 +1,33 @@
+From f614ed0d4cc385bfb6777396637c668c55330fdd Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 23 Nov 2026 00:48:01 -0500
+Subject: [PATCH] PartDesign: Helix self-intersection check uses the current
+ axis
+
+The check added in book ch20/0001 called safePitch() before execute() refreshed Axis
+from ReferenceAxis. On a helix created by a script (Profile and ReferenceAxis set, then
+recompute) Axis still held its default, safePitch() saw the axis as orthogonal to the
+profile and returned a tiny pitch, so a pitch of 3 for a profile of diameter 4 was stored
+without an error (its volume is twice the true one). Found while preparing lesson 20 of
+the WenQuest CAD course. Refresh the axis before the check.
+---
+ src/Mod/PartDesign/App/FeatureHelix.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/Mod/PartDesign/App/FeatureHelix.cpp b/src/Mod/PartDesign/App/FeatureHelix.cpp
+index 9a912d7..15da726 100644
+--- a/src/Mod/PartDesign/App/FeatureHelix.cpp
++++ b/src/Mod/PartDesign/App/FeatureHelix.cpp
+@@ -307,6 +307,9 @@ App::DocumentObjectExecReturn* Helix::execute()
+     if (mode != HelixMode::height_turns_growth && Turns.getValue() >= 1.0) {
+         double minPitch = 0.0;
+         try {
++            // safePitch() reads Axis, which is only refreshed from ReferenceAxis further down:
++            // on a new or edited feature it still held the default and the check never fired
++            updateAxis();
+             minPitch = safePitch();
+         }
+         catch (const Base::Exception&) {
+-- 
+2.43.0
+

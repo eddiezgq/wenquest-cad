@@ -70,6 +70,30 @@ class BookRegressionTests(unittest.TestCase):
         bad.Volume
         self.assertLess(time.time() - t, 30.0)
 
+    def test_helix_pitch_below_profile_is_refused(self):
+        # chapter 20 (0002): a helix whose pitch is smaller than its profile intersects itself;
+        # built by script (profile and axis set, then recompute) it used to be stored silently
+        doc = App.newDocument("BookHelixPitch")
+        try:
+            body = doc.addObject("PartDesign::Body", "Body")
+            sk = body.newObject("Sketcher::SketchObject", "Sk")
+            sk.AttachmentSupport = [(body.Origin.OriginFeatures[4], "")]
+            sk.MapMode = "FlatFace"
+            sk.addGeometry(Part.Circle(V(10, 0, 0), V(0, 0, 1), 2))
+            doc.recompute()
+            hx = body.newObject("PartDesign::AdditiveHelix", "Helix")
+            hx.Profile = sk
+            hx.ReferenceAxis = (sk, ["V_Axis"])
+            hx.Pitch = 3
+            hx.Height = 15
+            doc.recompute()
+            self.assertIn("Invalid", hx.State)
+            hx.Pitch = 6
+            doc.recompute()
+            self.assertNotIn("Invalid", hx.State)
+        finally:
+            App.closeDocument(doc.Name)
+
     def test_multifuse_does_not_depend_on_order(self):
         # chapter 29: a fusion is commutative; reordering Shapes must not change the result
         doc = App.newDocument("BookMultiFuseOrder")
