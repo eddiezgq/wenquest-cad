@@ -1,23 +1,33 @@
-# 在装好的问渠 CAD 上跑一个 FreeCADCmd 脚本（课程演示前核对内核行为，如第 20 课 acceptance/lesson20_probe.py）。手动运行。
+# 在装好的问渠 CAD 和官方 FreeCAD（Windows 版，同一台机器）上跑同一个 FreeCADCmd 脚本，对照内核行为
+# （课程演示前核对，如第 20 课 acceptance/lesson20_probe.py）。脚本按段跑（环境变量 PROBE20_ONLY），每段限时。手动运行。
 name: WenQuest CAD probe
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 发布版标签
+        description: 问渠 CAD 发布版标签
         default: v0.3.0-beta.2
+      freecad_tag:
+        description: 官方 FreeCAD 发布版标签（空 = 不跑）
+        default: "1.1.4"
       script:
         description: 本仓库里的脚本
         default: acceptance/lesson20_probe.py
+      sections:
+        description: 分段（空格分开；空 = 整个脚本一次跑）
+        default: "ch18 ch20 ch21 ch22 ch28 ch33"
+      minutes:
+        description: 每段限时（分钟）
+        default: "6"
 permissions:
   contents: read
 jobs:
   probe:
     runs-on: windows-2022
-    timeout-minutes: 40
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-      - name: 装好、跑脚本
+      - name: 装问渠 CAD、取官方 FreeCAD
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -26,7 +36,31 @@ jobs:
           $setup = (Get-ChildItem pkg -Filter *.exe | Select-Object -First 1).FullName
           $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=C:\wq" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "安装失败" }
+          if ("${{ inputs.freecad_tag }}") {
+            gh release download "${{ inputs.freecad_tag }}" --repo FreeCAD/FreeCAD --pattern "*Windows-x86_64*.7z" --dir fcpkg
+            Get-ChildItem fcpkg | ForEach-Object { "$($_.Name) $([math]::Round($_.Length/1MB)) MB" }
+            7z x (Get-ChildItem fcpkg -Filter *.7z | Select-Object -First 1).FullName -oC:\fc -y | Out-Null
+            (Get-ChildItem C:\fc -Recurse -Filter FreeCADCmd.exe | Select-Object -First 1).FullName | Out-File fc_cmd.txt
+            Get-Content fc_cmd.txt
+          }
+      - name: 跑
+        shell: pwsh
+        run: |
           $s = (Resolve-Path "${{ inputs.script }}").Path
-          $p = Start-Process -FilePath cmd.exe -ArgumentList "/c", "C:\wq\WenQuestCAD.cmd --cmd ""$s"" > out.txt 2>&1" -NoNewWindow -PassThru
-          if (-not $p.WaitForExit(900000)) { Write-Host "超时，停掉"; Stop-Process -Id $p.Id -Force; Get-Process | Where-Object { $_.ProcessName -like "FreeCAD*" } | Stop-Process -Force }
-          Get-Content out.txt | Select-String -Pattern "PROBE|STEP20|Exception|Error|Traceback" | ForEach-Object { $_.Line }
+          $secs = "${{ inputs.sections }}".Split(" ", [StringSplitOptions]::RemoveEmptyEntries); if (-not $secs) { $secs = @("") }
+          $who = @(@{ name = "WQCAD"; cmd = "C:\wq\WenQuestCAD.cmd --cmd" })
+          if (Test-Path fc_cmd.txt) { $who += @{ name = "FREECAD"; cmd = "`"$((Get-Content fc_cmd.txt).Trim())`"" } }
+          foreach ($w in $who) {
+            foreach ($sec in $secs) {
+              $env:PROBE20_ONLY = $sec
+              $log = "out-$($w.name)-$sec.txt"
+              $t0 = Get-Date
+              $p = Start-Process -FilePath cmd.exe -ArgumentList "/c", "$($w.cmd) ""$s"" > $log 2>&1" -NoNewWindow -PassThru
+              $done = $p.WaitForExit([int]"${{ inputs.minutes }}" * 60000)
+              $sec_t = [math]::Round(((Get-Date) - $t0).TotalSeconds)
+              if (-not $done) { Get-Process | Where-Object { $_.ProcessName -like "FreeCAD*" } | Stop-Process -Force; Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+              $lines = Get-Content $log -ErrorAction SilentlyContinue | Select-String -Pattern "PROBE20|Exception|Traceback" | ForEach-Object { $_.Line }
+              Write-Host "== $($w.name) $sec  $(if ($done) { "$sec_t s" } else { "超时（$sec_t s）" })"
+              $lines | ForEach-Object { Write-Host "   $_" }
+            }
+          }
