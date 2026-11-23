@@ -1,0 +1,129 @@
+# 问渠 CAD 的 Linux 版环境（录课用，不发给用户）：FreeCAD 1.1.4 + patches/series.txt 全部补丁，pixi 环境里编译、安装，
+# 改相对路径（qt6.conf），打成 tar.zst 存为工作流附件。课程录屏用的云端 Linux 以前是官方 FreeCAD 1.1.4 + 问渠品牌，
+# 内核没有补丁；第 20 课要对比官方版和问渠 CAD，以后各课也用真的问渠 CAD 内核（11-22）。
+# 一次编不完就分段接力（同 installer.yml）。手动运行。
+name: WenQuest CAD Linux env
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: wqcad-linux-env
+  cancel-in-progress: false
+env:
+  ROOT: /home/runner/wqcad
+  BUDGET_MIN: "300"
+jobs:
+  build:
+    strategy:
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        leg: [1, 2, 3]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: kit }
+      - name: 已经做完了？
+        id: done
+        uses: actions/cache/restore@v4
+        with:
+          path: kit/.done
+          key: wqcad-linux-done-${{ github.run_id }}
+          lookup-only: true
+      - name: 腾磁盘
+        if: steps.done.outputs.cache-hit != 'true'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h / | tail -1
+      - name: pixi
+        if: steps.done.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+      - name: 取 FreeCAD 1.1.4、打补丁、源码时间统一
+        if: steps.done.outputs.cache-hit != 'true'
+        run: |
+          git -c core.autocrlf=false clone --quiet --branch 1.1.4 --depth 1 --recurse-submodules --shallow-submodules https://github.com/FreeCAD/FreeCAD.git "$ROOT/FreeCAD"
+          cd "$ROOT/FreeCAD"
+          n=0
+          while IFS=$'\t' read -r f d; do
+            [ -z "$f" ] && continue
+            git apply --index --whitespace=nowarn "$GITHUB_WORKSPACE/kit/patches/$f" || { echo "::error::补丁打不上：$f"; exit 1; }
+            n=$((n+1))
+          done < "$GITHUB_WORKSPACE/kit/patches/series.txt"
+          echo "打上 $n 个补丁"
+          find . -path ./.git -prune -o -type f -exec touch -h -d 2020-01-01 {} +
+      - name: 取上一段的编译结果
+        if: steps.done.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/wqcad/FreeCAD/build/release
+          key: wqcad-linux-build-${{ github.run_id }}-${{ matrix.leg }}
+          restore-keys: wqcad-linux-build-${{ github.run_id }}-
+      - name: 依赖与配置
+        if: steps.done.outputs.cache-hit != 'true'
+        run: |
+          cd "$ROOT/FreeCAD"
+          pixi config set --local run-post-link-scripts insecure
+          pixi install
+          if [ ! -f build/release/CMakeCache.txt ]; then
+            pixi run cmake --preset conda-linux-release -DENABLE_DEVELOPER_TESTS=OFF
+          fi
+      - name: 编译（这一段最多 ${{ env.BUDGET_MIN }} 分钟）
+        if: steps.done.outputs.cache-hit != 'true'
+        id: build
+        run: |
+          cd "$ROOT/FreeCAD"
+          export CMAKE_BUILD_PARALLEL_LEVEL=4
+          set +e
+          timeout -s INT "$((BUDGET_MIN * 60))" pixi run cmake --build build/release > build-out.log 2> build-err.log
+          rc=$?
+          set -e
+          tail -5 build-out.log; tail -30 build-err.log
+          if [ $rc = 124 ] || [ $rc = 130 ]; then echo "时间到，存起来下一段接着编"; echo "finished=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          [ $rc = 0 ] || { echo "::error::编译出错（$rc）"; exit 1; }
+          echo "finished=true" >> "$GITHUB_OUTPUT"
+      - name: 存这一段的编译结果
+        if: steps.done.outputs.cache-hit != 'true' && steps.build.outputs.finished == 'false'
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/wqcad/FreeCAD/build/release
+          key: wqcad-linux-build-${{ github.run_id }}-${{ matrix.leg }}
+      - name: 安装、品牌、改相对路径、核对、打包
+        if: steps.build.outputs.finished == 'true'
+        run: |
+          cd "$ROOT/FreeCAD"
+          pixi run cmake --install build/release
+          E="$ROOT/FreeCAD/.pixi/envs/default"
+          cp "$GITHUB_WORKSPACE/kit/branding.xml" "$E/bin/branding.xml"
+          for c in "$E/bin/qt6.conf" "$E/qt6.conf"; do
+            [ -f "$c" ] || continue
+            rel=$(python3 -c "import os,sys;print(os.path.relpath(sys.argv[1], os.path.dirname(sys.argv[2])))" "$E" "$c")
+            printf '[Paths]\nPrefix = %s\nLibraries = lib\nLibraryExecutables = lib/qt6\nBinaries = lib/qt6/bin\nPlugins = lib/qt6/plugins\nQmlImports = lib/qt6/qml\nArchData = lib/qt6\nData = share/qt6\nTranslations = share/qt6/translations\n' "$rel" > "$c"
+            echo "== $c"; cat "$c"
+          done
+          ls "$E/lib/qt6/plugins/platforms" | head
+          "$E/bin/FreeCADCmd" -c "import FreeCAD,Part;print('LINUX-OK', FreeCAD.Version()[:3], Part.makeBox(1,2,3).Volume)"
+          "$E/bin/FreeCADCmd" "$GITHUB_WORKSPACE/kit/tests/book_regression_tests.py" 2>&1 | tail -5 || true
+          rm -rf "$E/include" "$E/pkgs" "$E/share/doc" "$E/lib/cmake" "$E/conda-meta"
+          find "$E" -name "*.a" -delete; find "$E" -name __pycache__ -type d -prune -exec rm -rf {} +
+          du -sh "$E"
+          tar -C "$E" -I "zstd -10 -T0" -cf "$GITHUB_WORKSPACE/wqcad-linux-env.tar.zst" .
+          ls -l "$GITHUB_WORKSPACE/wqcad-linux-env.tar.zst"
+          touch "$GITHUB_WORKSPACE/kit/.done"
+      - name: 记“做完了”
+        if: steps.build.outputs.finished == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: kit/.done
+          key: wqcad-linux-done-${{ github.run_id }}
+      - name: 存附件
+        if: steps.build.outputs.finished == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wqcad-linux-env
+          path: wqcad-linux-env.tar.zst
+          retention-days: 30
+          compression-level: 0
