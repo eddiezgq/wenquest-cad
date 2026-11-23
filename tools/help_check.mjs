@@ -8,7 +8,7 @@ const { chromium, devices } = pw;
 import fs from "node:fs";
 
 const PAGES = process.argv.slice(2);
-const EXPECT = { sections: 23, videos: 49, quizzes: 65, anims: 7 };
+const EXPECT = { sections: 23, videos: 50, quizzes: 65, anims: 7 };
 fs.mkdirSync("out/shots", { recursive: true });
 const report = [];
 let failures = 0;
