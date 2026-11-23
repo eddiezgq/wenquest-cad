@@ -33,6 +33,20 @@ if mark("ch18a"):
         out["fillet12_part_api"] = {"valid": s.isValid(), "volume": round(s.Volume, 1)}
     except Exception as e:  # noqa: BLE001
         out["fillet12_part_api"] = "ERR " + str(e)[:160]
+if mark("ch18d"):
+    import time
+    b = Part.makeBox(20, 20, 20)
+    t = time.time()
+    s = b.makeFillet(12, b.Edges)
+    out["ch18d_fillet_s"] = round(time.time() - t, 2)
+    t = time.time()
+    out["ch18d_valid"] = s.isValid()
+    out["ch18d_valid_s"] = round(time.time() - t, 2)
+    out["ch18d_faces"] = sorted({f.Surface.__class__.__name__ for f in s.Faces})
+    print("PROBE20 " + json.dumps(out, ensure_ascii=False, default=str), flush=True)
+    t = time.time()
+    out["ch18d_volume"] = s.Volume
+    out["ch18d_volume_s"] = round(time.time() - t, 2)
 if mark("ch18b"):
     b = Part.makeBox(20, 20, 20)
     try:
