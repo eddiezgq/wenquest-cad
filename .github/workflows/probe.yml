@@ -1,0 +1,31 @@
+# 在装好的问渠 CAD 上跑一个 FreeCADCmd 脚本（课程演示前核对内核行为，如第 20 课 acceptance/lesson20_probe.py）。手动运行。
+name: WenQuest CAD probe
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 发布版标签
+        default: v0.3.0-beta.2
+      script:
+        description: 本仓库里的脚本
+        default: acceptance/lesson20_probe.py
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: 装好、跑脚本
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" --pattern "*.exe" --dir pkg
+          $setup = (Get-ChildItem pkg -Filter *.exe | Select-Object -First 1).FullName
+          $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=C:\wq" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "安装失败" }
+          $s = (Resolve-Path "${{ inputs.script }}").Path
+          cmd /c "C:\wq\WenQuestCAD.cmd --cmd ""$s""" 2>&1 | Out-File -Encoding utf8 out.txt
+          Get-Content out.txt | Select-String -Pattern "PROBE|Exception|Error" | ForEach-Object { $_.Line }
