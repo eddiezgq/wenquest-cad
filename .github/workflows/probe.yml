@@ -14,7 +14,7 @@ permissions:
 jobs:
   probe:
     runs-on: windows-2022
-    timeout-minutes: 60
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: 装好、跑脚本
@@ -27,5 +27,6 @@ jobs:
           $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=C:\wq" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "安装失败" }
           $s = (Resolve-Path "${{ inputs.script }}").Path
-          cmd /c "C:\wq\WenQuestCAD.cmd --cmd ""$s""" 2>&1 | Out-File -Encoding utf8 out.txt
-          Get-Content out.txt | Select-String -Pattern "PROBE|Exception|Error" | ForEach-Object { $_.Line }
+          $p = Start-Process -FilePath cmd.exe -ArgumentList "/c", "C:\wq\WenQuestCAD.cmd --cmd ""$s"" > out.txt 2>&1" -NoNewWindow -PassThru
+          if (-not $p.WaitForExit(900000)) { Write-Host "超时，停掉"; Stop-Process -Id $p.Id -Force; Get-Process | Where-Object { $_.ProcessName -like "FreeCAD*" } | Stop-Process -Force }
+          Get-Content out.txt | Select-String -Pattern "PROBE|STEP20|Exception|Error|Traceback" | ForEach-Object { $_.Line }

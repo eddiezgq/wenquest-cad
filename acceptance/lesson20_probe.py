@@ -14,10 +14,15 @@ V = App.Vector
 out = {"version": App.Version()[:3]}
 
 
+def mark(k):
+    print("STEP20", k, flush=True)
+
+
 def state(o):
     return list(o.State)
 
 
+mark("ch18")
 # ch18 / ch42：圆角半径太大
 b = Part.makeBox(20, 20, 20)
 try:
@@ -44,6 +49,7 @@ out["pd_fillet12"] = {"state": state(fl), "null": fl.Shape.isNull(),
                       "volume": None if fl.Shape.isNull() else round(fl.Shape.Volume, 1),
                       "tip_volume": round(body.Shape.Volume, 1) if not body.Shape.isNull() else None}
 
+mark("ch20")
 # ch20：螺旋节距太小（截面圆 ⌀4，节距 3）
 doc = App.newDocument("h")
 body = doc.addObject("PartDesign::Body", "Body")
@@ -64,6 +70,7 @@ hx.Pitch = 6
 doc.recompute()
 out["helix_p6"] = {"state": state(hx), "volume": None if hx.Shape.isNull() else round(hx.Shape.Volume, 1)}
 
+mark("ch21")
 # ch21：草图改尺寸，别处有冗余约束
 doc = App.newDocument("s")
 sk = doc.addObject("Sketcher::SketchObject", "Sk")
@@ -86,6 +93,7 @@ except Exception as e:  # noqa: BLE001
     out["setdatum40"] = "ERR " + str(e)[:160]
 out["dx_after"] = sk.Constraints[dx].Value
 
+mark("ch22")
 # ch22：前面失败，后面的特征是不是还标“要重算”
 doc = App.newDocument("r")
 bx = doc.addObject("Part::Box", "Box")
@@ -105,6 +113,7 @@ fl.Edges = [(i + 1, 10.0, 10.0) for i in range(12)]
 doc.recompute()
 out["recompute_after_fail"] = {"fillet": state(fl), "cut": state(cut), "cut_volume_unchanged": abs(cut.Shape.Volume - v0) < 1e-6}
 
+mark("ch28")
 # ch28：B 样条表示的圆柱、球的体积和惯量
 cyl = Part.makeCylinder(3, 10).toNurbs()
 out["nurbs_cyl_volume_relerr"] = abs(cyl.Volume - math.pi * 90) / (math.pi * 90)
@@ -112,6 +121,7 @@ sp = Part.makeSphere(10).toNurbs().Solids[0]
 m = 4 / 3 * math.pi * 1000
 out["nurbs_sphere_izz_relerr"] = abs(sp.MatrixOfInertia.A33 - 0.4 * m * 100) / (0.4 * m * 100)
 
+mark("ch33")
 # ch33：带颜色导出装配里的零件
 doc = App.newDocument("e")
 asm = doc.addObject("App::Part", "Assembly")
