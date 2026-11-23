@@ -1,4 +1,4 @@
-# 问渠 CAD 安装包（第 175 轮，测试版）：在 GitHub 的 Windows 机器上编 FreeCAD 1.1.4 + 27 个补丁 + AI 工作台，打成带安装向导的 Setup.exe。
+# 问渠 CAD 安装包（第 175 轮，测试版）：在 GitHub 的 Windows 机器上编 FreeCAD 1.1.4 + 28 个补丁 + AI 工作台，打成带安装向导的 Setup.exe。
 # 一次编译超过单个任务 6 小时的上限，所以分几段接力：每段最多编 5 小时，没编完就把 build/release 存进缓存，下一段接着编（Ninja 增量）。
 # 源码每段重新取，文件时间统一改成 2020-01-01（比缓存里的目标文件旧），Ninja 才不会把所有东西当成“改过了”重编。
 name: WenQuest CAD installer
@@ -10,7 +10,7 @@ on:
         default: "de568e6772165204f6643b87a007842c25dbdffa"
       version:
         description: "测试版版本号"
-        default: "0.3.1-beta"
+        default: "0.3.2-beta"
 permissions:
   contents: write
 concurrency:
@@ -204,4 +204,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "v${{ inputs.version }}"
-          gh release create $tag --repo ${{ github.repository }} --prerelease --title "问渠 CAD ${{ inputs.version }}（测试版）" --notes "测试版：FreeCAD 1.1.4 + 27 个补丁 + AI 工作台（freecad-ai-parts ${{ inputs.ai_commit }}）。安装教程见问渠官网下载页。" (Get-ChildItem out\*.exe, out\*.sha256 | ForEach-Object FullName)
+          gh release create $tag --repo ${{ github.repository }} --prerelease --title "问渠 CAD ${{ inputs.version }}（测试版）" --notes "测试版：FreeCAD 1.1.4 + 28 个补丁 + AI 工作台（freecad-ai-parts ${{ inputs.ai_commit }}）。安装教程见问渠官网下载页。" (Get-ChildItem out\*.exe, out\*.sha256 | ForEach-Object FullName)
