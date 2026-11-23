@@ -142,7 +142,10 @@ jobs:
           Get-ChildItem -Recurse -Directory "$M\lib" -Filter __pycache__ | Remove-Item -Recurse -Force
           & "$Env\python.exe" -c "import sys; sys.path.insert(0, r'$M\lib'); import wq_license, freecad_addon; print('GATE-OK', bool(wq_license.KEYS['us']), bool(wq_license.KEYS['cn']))"
           if ($LASTEXITCODE -ne 0) { throw "AI 工作台字节码导入失败" }
-          "ccx: $(Test-Path "$Env\Library\bin\ccx.exe")"
+          # 11-23（细则-帮助与培训 第十三节第 2 件）：“帮助与培训”打开的课程网页本机副本（课文、小测、动画离线；录屏在线取）
+          & "$Env\python.exe" "$env:GITHUB_WORKSPACE\tools\help_offline.py" "$M\help"
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$M\help\wqcad\en\index.html")) { throw "课程网页副本没做好" }
+          "ccx:$(Test-Path "$Env\Library\bin\ccx.exe")"
       - name: 冒烟测试（无界面打开、测试脚本）
         if: steps.build.outputs.finished == 'true'
         shell: pwsh
