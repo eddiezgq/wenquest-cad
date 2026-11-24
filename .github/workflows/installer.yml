@@ -152,7 +152,26 @@ jobs:
         run: |
           $Src = "$env:ROOT\FreeCAD"; Set-Location $Src
           pixi run .pixi/envs/default/Library/bin/FreeCADCmd.exe -c "import FreeCAD,Part;print('WQCAD-OK', FreeCAD.Version()[:3], Part.makeBox(1,2,3).Volume)"
-          pixi run .pixi/envs/default/Library/bin/FreeCADCmd.exe "$env:GITHUB_WORKSPACE/kit/run_book_tests.py" 2>&1 | Select-Object -Last 25
+          # 0.3.6 细则 A1：书里 16 组回归测试逐组真跑（原来没设 WQCAD_TEST_FILE，脚本一启动就出错，被吞掉，等于没测）。
+          # 有失败或出错就不出包；每组运行的个数要等于文件里 test 方法的个数，少了说明没跑全。例外只有第 6 章那组（问题在 OCCT，第二批编进安装包后删掉这一行）
+          $KnownOcct = @("TestPartBooleanFarFromOrigin")
+          $runs = 0; $bad = @()
+          foreach ($f in Get-ChildItem "$env:GITHUB_WORKSPACE\kit\tests" -Filter *.py) {
+            $env:WQCAD_TEST_FILE = $f.FullName
+            $env:WQCAD_OUT = "$env:RUNNER_TEMP\book-$($f.BaseName).json"
+            Remove-Item $env:WQCAD_OUT -ErrorAction SilentlyContinue
+            pixi run .pixi/envs/default/Library/bin/FreeCADCmd.exe "$env:GITHUB_WORKSPACE/kit/run_book_tests.py" 2>&1 | Out-Null
+            if (-not (Test-Path $env:WQCAD_OUT)) { $bad += "$($f.BaseName)：没有结果"; continue }
+            $r = Get-Content $env:WQCAD_OUT -Raw | ConvertFrom-Json
+            $runs += $r.run
+            $want = (Select-String -Path $f.FullName -Pattern '^    def test').Count
+            if ($r.run -ne $want) { $bad += "$($f.BaseName)：运行 $($r.run) 个，文件里有 $want 个" }
+            "本书测试 $($f.BaseName)：运行 $($r.run)，失败 $($r.failures)，出错 $($r.errors)，跳过 $($r.skipped)"
+            if (($r.failures + $r.errors) -gt 0 -and $KnownOcct -notcontains $f.BaseName) { $bad += "$($f.BaseName)：失败 $($r.failures)、出错 $($r.errors)" }
+          }
+          "本书测试合计运行 $runs 个"
+          if ($runs -lt 61) { $bad += "合计只运行了 $runs 个（16 组共 61 个）" }
+          if ($bad) { throw ("本书回归测试没过：" + ($bad -join "；")) }
           # 11-20：装配体多体动力学（FreeCAD 1.1 兼容）、出报告（python-docx）、MuJoCo 在装好的环境里真能用
           $env:WQCAD_AI_LIB = "$Src\.pixi\envs\default\Library\Mod\FreeCADAIParts\lib"
           $env:WQCAD_OUT = "$env:RUNNER_TEMP\ai-e2e.json"
