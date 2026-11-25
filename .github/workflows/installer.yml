@@ -7,10 +7,10 @@ on:
     inputs:
       ai_commit:
         description: "freecad-ai-parts 固定提交（同 ai-wqcad.ps1）"
-        default: "dde6e50813b46f11d9bc9f26b735c08e518dacd8"
+        default: "69fd2d6cd87a21b91008dec08f557cc6eb9f9b73"
       version:
         description: "测试版版本号"
-        default: "0.3.5-beta"
+        default: "0.3.6-beta"
 permissions:
   contents: write
 concurrency:
@@ -226,4 +226,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "v${{ inputs.version }}"
-          gh release create $tag --repo ${{ github.repository }} --prerelease --title "问渠 CAD ${{ inputs.version }}（测试版）" --notes "测试版：FreeCAD 1.1.4 + 29 个补丁 + AI 工作台（freecad-ai-parts ${{ inputs.ai_commit }}）。安装教程见问渠官网下载页。" (Get-ChildItem out\*.exe, out\*.sha256 | ForEach-Object FullName)
+          gh release create $tag --repo ${{ github.repository }} --prerelease --title "问渠 CAD ${{ inputs.version }}（测试版）" --notes "测试版：FreeCAD 1.1.4 + 29 个补丁 + AI 工作台（freecad-ai-parts ${{ inputs.ai_commit }}）。0.3.6 按三本书的发现修了有限元、多体动力学的 8 处错误，出包时逐组跑书里 16 组回归测试。安装教程见问渠官网下载页。" (Get-ChildItem out\*.exe, out\*.sha256 | ForEach-Object FullName)
