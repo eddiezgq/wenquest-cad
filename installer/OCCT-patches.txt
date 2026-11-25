@@ -1,0 +1,21 @@
+﻿问渠 CAD 使用的 Open CASCADE Technology（OCCT）—— 改动说明 / Modified OCCT — source notice
+
+本安装包里的 TKMath.dll、TKGeomAlgo.dll、TKTopAlgo.dll 是由 OCCT 7.8.1 打上以下 5 个补丁后重新编译的；
+OCCT 按 GNU LGPL 2.1（附 OCCT 例外条款）发布。改过的源码 = OCCT 7.8.1 官方源码 + 下面的补丁：
+The files TKMath.dll, TKGeomAlgo.dll and TKTopAlgo.dll in this package were rebuilt from OCCT 7.8.1 with the
+5 patches below. OCCT is licensed under the GNU LGPL 2.1 with the OCCT exception. Modified source =
+the official OCCT 7.8.1 source + these patches:
+
+  01-ch06-0001  IntCurveSurface: intersect a line with a quadric in a local frame
+  02-ch10-0001  CSLib: Normal, relative null derivative
+  03-ch13-0001  BRepCheck: implement InvalidToleranceValue
+  04-ch13-0002  BRepLib: FindValidRange returns the outside point
+  05-ch16-0001  IntCurve: circle-circle crossing is a point
+
+OCCT 7.8.1 源码 / source:  https://github.com/Open-Cascade-SAS/OCCT/tree/V7_8_1
+补丁与编译脚本 / patches and build script:
+  https://github.com/eddiezgq/wenquest-cad/tree/main/patches/occt-7.8.1
+  https://github.com/eddiezgq/wenquest-cad/blob/main/build-occt.ps1
+
+可以用自己编译的同名程序库替换这 3 个文件（放在 env\Library\bin）。
+You may replace these 3 files (in env\Library\bin) with your own builds of the same libraries.

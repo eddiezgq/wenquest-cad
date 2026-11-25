@@ -1,10 +1,12 @@
 ﻿# 问渠 CAD 0.2b：给 OCCT 7.8.1 打上本书的修正（细则见 docs\细则-0.2.md）
 #   powershell -ExecutionPolicy Bypass -File .\build-occt.ps1            # 编译并替换（约 1 小时）
 #   powershell -ExecutionPolicy Bypass -File .\build-occt.ps1 -Restore   # 换回原来的 OCCT
+#   pwsh -File .\build-occt.ps1 -Root D:\wqcad -OutDir D:\occt-out      # 只编不换：3 个库放到 OutDir（安装包工作流用，0.3.7）
 # 只重编受补丁影响的 3 个程序库（TKMath、TKGeomAlgo、TKTopAlgo），补丁不改头文件，FreeCAD 不用重编。
 param(
     [string]$Root = "C:\wqcad",
-    [switch]$Restore
+    [switch]$Restore,
+    [string]$OutDir = ""
 )
 
 $ErrorActionPreference = "Continue"
@@ -27,7 +29,8 @@ $Occt = Join-Path $Root "occt-7.8.1"
 $Build = Join-Path $Root "occt-7.8.1-build"
 $Backup = Join-Path $Root "occt-7.8.1-original"
 $Dlls = @("TKMath.dll", "TKGeomAlgo.dll", "TKTopAlgo.dll")
-if (-not (Test-Path (Join-Path $Bin "FreeCAD.exe"))) { Fail "没有找到问渠 CAD（先完成 0.1）" }
+if (-not $OutDir -and -not (Test-Path (Join-Path $Bin "FreeCAD.exe"))) { Fail "没有找到问渠 CAD（先完成 0.1）" }
+if (-not (Get-ChildItem (Join-Path $Src ".pixi\envs\default\conda-meta") -Filter "occt-7.8.1-*.json" -ErrorAction SilentlyContinue)) { Fail "环境里的 OCCT 不是 7.8.1，补丁对不上" }
 
 if ($Restore) {
     foreach ($d in $Dlls) {
@@ -79,6 +82,17 @@ if ($rc -ne 0) { Fail "配置失败（见 logs\occt-configure.log 与 .err）" }
 Step "4/5 编译 TKMath、TKGeomAlgo、TKTopAlgo（约 1 小时，电脑不要睡眠）"
 $rc = Invoke-Env @("cmake", "--build", "`"$(Fwd $Build)`"", "--target", "TKMath", "TKGeomAlgo", "TKTopAlgo") (Join-Path $Logs "occt-build.log")
 if ($rc -ne 0) { Fail "编译失败（见 logs\occt-build.log 与 .err）" }
+
+if ($OutDir) {
+    New-Item -ItemType Directory -Force $OutDir | Out-Null
+    foreach ($d in $Dlls) {
+        $new = Get-ChildItem $Build -Recurse -Filter $d | Where-Object { $_.FullName -notmatch "\\CMakeFiles\\" } | Select-Object -First 1
+        if (-not $new) { Fail "编译结果里找不到 $d" }
+        Copy-Item $new.FullName (Join-Path $OutDir $d) -Force
+        Step "  已放到 $OutDir：$d"
+    }
+    exit 0
+}
 
 Step "5/5 备份原来的程序库并替换"
 New-Item -ItemType Directory -Force $Backup | Out-Null

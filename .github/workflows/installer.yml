@@ -10,9 +10,10 @@ on:
         default: "69fd2d6cd87a21b91008dec08f557cc6eb9f9b73"
       version:
         description: "测试版版本号"
-        default: "0.3.6-beta"
+        default: "0.3.7-beta"
 permissions:
   contents: write
+  actions: read
 concurrency:
   group: wqcad-installer
   cancel-in-progress: false
@@ -20,6 +21,53 @@ env:
   ROOT: D:\wqcad
   BUDGET_MIN: "290"
 jobs:
+  # 0.3.7（细则-0.3.7.md）：5 个 OCCT 补丁编进安装包。只编 TKMath、TKGeomAlgo、TKTopAlgo，按补丁内容存缓存，补丁不变以后直接取；
+  # 和 FreeCAD 编译同时跑，编好放进本次运行的附件 occt-dlls，build 那段装好环境后取来换上。
+  occt:
+    name: occt
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: kit }
+      - name: 编过了？
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: D:\occt-out
+          key: wqcad-occt-781-fc114-${{ hashFiles('kit/patches/occt-7.8.1/*.patch', 'kit/build-occt.ps1') }}
+      - name: pixi
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          iwr -useb https://pixi.sh/install.ps1 | iex
+          "$env:USERPROFILE\.pixi\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: 编 OCCT 7.8.1 + 5 个补丁（build-occt.ps1 -OutDir）
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $Src = "$env:ROOT\FreeCAD"
+          git -c core.autocrlf=false clone --quiet --branch 1.1.4 --depth 1 https://github.com/FreeCAD/FreeCAD.git $Src
+          Set-Location $Src
+          pixi config set --local run-post-link-scripts insecure
+          pixi install
+          if ($LASTEXITCODE -ne 0) { throw "pixi install" }
+          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE\kit\build-occt.ps1" -Root $env:ROOT -OutDir D:\occt-out
+          $rc = $LASTEXITCODE
+          Get-ChildItem "$env:GITHUB_WORKSPACE\kit\logs" -File -ErrorAction SilentlyContinue | ForEach-Object { "== $($_.Name)"; Get-Content $_.FullName -Tail 20 }
+          if ($rc -ne 0) { throw "OCCT 编译失败" }
+          foreach ($d in "TKMath.dll", "TKGeomAlgo.dll", "TKTopAlgo.dll") { if (-not (Test-Path "D:\occt-out\$d")) { throw "缺 $d" } }
+      - name: 存起来（补丁不变以后不再编）
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: D:\occt-out
+          key: wqcad-occt-781-fc114-${{ hashFiles('kit/patches/occt-7.8.1/*.patch', 'kit/build-occt.ps1') }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: occt-dlls
+          path: D:\occt-out\*.dll
+          retention-days: 7
   build:
     strategy:
       max-parallel: 1
@@ -146,6 +194,43 @@ jobs:
           & "$Env\python.exe" "$env:GITHUB_WORKSPACE\kit\tools\help_offline.py" "$M\help"
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$M\help\wqcad\en\index.html")) { throw "课程网页副本没做好" }
           "ccx:$(Test-Path "$Env\Library\bin\ccx.exe")"
+      - name: 换上打过补丁的 OCCT（0.3.7），换前换后各跑一次 TestPartApp
+        if: steps.build.outputs.finished == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $Src = "$env:ROOT\FreeCAD"; Set-Location $Src
+          $Env = "$Src\.pixi\envs\default"
+          if (-not (Get-ChildItem "$Env\conda-meta" -Filter "occt-7.8.1-*.json")) { throw "环境里的 OCCT 不是 7.8.1，补丁对不上" }
+          # 等 occt 那个任务（一般早就完了）
+          for ($i = 0; $i -lt 90; $i++) {
+            $st = gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=50" --jq '.jobs[] | select(.name == "occt") | .status + " " + (.conclusion // "")'
+            if ($st -like "completed*") { break }
+            Start-Sleep 60
+          }
+          if ($st -ne "completed success") { throw "OCCT 任务没成功：$st" }
+          gh run download ${{ github.run_id }} --repo ${{ github.repository }} -n occt-dlls -D D:\occt-in
+          if ($LASTEXITCODE -ne 0) { throw "取不到 OCCT 程序库" }
+          function PartTests($tag) {
+            $o = pixi run .pixi/envs/default/Library/bin/FreeCADCmd.exe -t TestPartApp 2>&1 | Out-String
+            $ran = [regex]::Match($o, 'Ran (\d+) tests?')
+            if (-not $ran.Success) { $o.Split("`n") | Select-Object -Last 30 | ForEach-Object { Write-Host $_ }; throw "TestPartApp（$tag）没跑起来" }
+            $f = @([regex]::Matches($o, '(?m)^(?:FAIL|ERROR): (\S+) \(([^)]+)\)') | ForEach-Object { "$($_.Groups[2].Value).$($_.Groups[1].Value)" } | Sort-Object -Unique)
+            Write-Host "TestPartApp（$tag）：运行 $($ran.Groups[1].Value)，失败或出错 $($f.Count)"; $f | ForEach-Object { Write-Host "  $_" }
+            return ,$f
+          }
+          $before = PartTests "换库前"
+          foreach ($d in "TKMath.dll", "TKGeomAlgo.dll", "TKTopAlgo.dll") {
+            if (-not (Test-Path "D:\occt-in\$d")) { throw "缺 $d" }
+            Copy-Item "D:\occt-in\$d" "$Env\Library\bin\$d" -Force
+            "已换上 $d"
+          }
+          $after = PartTests "换库后"
+          $new = @($after | Where-Object { $before -notcontains $_ })
+          if ($new.Count) { throw ("换库后 TestPartApp 多出失败：" + ($new -join "、")) }
+          "换库后没有多出失败"
+          $global:LASTEXITCODE = 0   # TestPartApp 原有的失败会让最后一次 FreeCADCmd 退出码非 0，比较已在上面做完
       - name: 冒烟测试（无界面打开、测试脚本）
         if: steps.build.outputs.finished == 'true'
         shell: pwsh
@@ -153,8 +238,7 @@ jobs:
           $Src = "$env:ROOT\FreeCAD"; Set-Location $Src
           pixi run .pixi/envs/default/Library/bin/FreeCADCmd.exe -c "import FreeCAD,Part;print('WQCAD-OK', FreeCAD.Version()[:3], Part.makeBox(1,2,3).Volume)"
           # 0.3.6 细则 A1：书里 16 组回归测试逐组真跑（原来没设 WQCAD_TEST_FILE，脚本一启动就出错，被吞掉，等于没测）。
-          # 有失败或出错就不出包；每组运行的个数要等于文件里 test 方法的个数，少了说明没跑全。例外只有第 6 章那组（问题在 OCCT，第二批编进安装包后删掉这一行）
-          $KnownOcct = @("TestPartBooleanFarFromOrigin")
+          # 有失败或出错就不出包；每组运行的个数要等于文件里 test 方法的个数，少了说明没跑全。0.3.7 起 OCCT 补丁已换上，没有例外。
           $runs = 0; $bad = @()
           foreach ($f in Get-ChildItem "$env:GITHUB_WORKSPACE\kit\tests" -Filter *.py) {
             $env:WQCAD_TEST_FILE = $f.FullName
@@ -167,7 +251,7 @@ jobs:
             $want = (Select-String -Path $f.FullName -Pattern '^    def test').Count
             if ($r.run -ne $want) { $bad += "$($f.BaseName)：运行 $($r.run) 个，文件里有 $want 个" }
             "本书测试 $($f.BaseName)：运行 $($r.run)，失败 $($r.failures)，出错 $($r.errors)，跳过 $($r.skipped)"
-            if (($r.failures + $r.errors) -gt 0 -and $KnownOcct -notcontains $f.BaseName) { $bad += "$($f.BaseName)：失败 $($r.failures)、出错 $($r.errors)" }
+            if (($r.failures + $r.errors) -gt 0) { $bad += "$($f.BaseName)：失败 $($r.failures)、出错 $($r.errors)" }
           }
           "本书测试合计运行 $runs 个"
           if ($runs -lt 61) { $bad += "合计只运行了 $runs 个（16 组共 61 个）" }
@@ -226,4 +310,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "v${{ inputs.version }}"
-          gh release create $tag --repo ${{ github.repository }} --prerelease --title "问渠 CAD ${{ inputs.version }}（测试版）" --notes "测试版：FreeCAD 1.1.4 + 29 个补丁 + AI 工作台（freecad-ai-parts ${{ inputs.ai_commit }}）。0.3.6 按三本书的发现修了有限元、多体动力学的 8 处错误，出包时逐组跑书里 16 组回归测试。安装教程见问渠官网下载页。" (Get-ChildItem out\*.exe, out\*.sha256 | ForEach-Object FullName)
+          gh release create $tag --repo ${{ github.repository }} --prerelease --title "问渠 CAD ${{ inputs.version }}（测试版）" --notes "测试版：FreeCAD 1.1.4 + 29 个补丁 + AI 工作台（freecad-ai-parts ${{ inputs.ai_commit }}）。0.3.6 按三本书的发现修了有限元、多体动力学的 8 处错误；0.3.7 把书里 5 个 OCCT 补丁编进安装包（OCCT 7.8.1，源码说明见安装目录 OCCT-patches.txt），书里 16 组 61 个回归测试全过才出包。安装教程见问渠官网下载页。" (Get-ChildItem out\*.exe, out\*.sha256 | ForEach-Object FullName)

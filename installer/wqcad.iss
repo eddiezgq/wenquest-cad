@@ -32,6 +32,7 @@ Source: "{#EnvDir}\*"; DestDir: "{app}\env"; Flags: recursesubdirs createallsubd
 Source: "WenQuestCAD.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "license-zh.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "license-en.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "OCCT-patches.txt"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{group}\问渠 CAD"; Filename: "{app}\WenQuestCAD.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\env\Library\bin\FreeCAD.exe"; Flags: runminimized
 Name: "{autodesktop}\问渠 CAD"; Filename: "{app}\WenQuestCAD.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\env\Library\bin\FreeCAD.exe"; Flags: runminimized
