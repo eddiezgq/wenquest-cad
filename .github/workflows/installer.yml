@@ -7,10 +7,10 @@ on:
     inputs:
       ai_commit:
         description: "freecad-ai-parts 固定提交（同 ai-wqcad.ps1）"
-        default: "69fd2d6cd87a21b91008dec08f557cc6eb9f9b73"
+        default: "5108af0204689613e70d1100484057dff4b31f53"
       version:
         description: "测试版版本号"
-        default: "0.3.7-beta"
+        default: "0.3.8-beta"
 permissions:
   contents: write
   actions: read
@@ -310,4 +310,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "v${{ inputs.version }}"
-          gh release create $tag --repo ${{ github.repository }} --prerelease --title "问渠 CAD ${{ inputs.version }}（测试版）" --notes "测试版：FreeCAD 1.1.4 + 29 个补丁 + AI 工作台（freecad-ai-parts ${{ inputs.ai_commit }}）。0.3.6 按三本书的发现修了有限元、多体动力学的 8 处错误；0.3.7 把书里 5 个 OCCT 补丁编进安装包（OCCT 7.8.1，源码说明见安装目录 OCCT-patches.txt），书里 16 组 61 个回归测试全过才出包。安装教程见问渠官网下载页。" (Get-ChildItem out\*.exe, out\*.sha256 | ForEach-Object FullName)
+          gh release create $tag --repo ${{ github.repository }} --prerelease --title "问渠 CAD ${{ inputs.version }}（测试版）" --notes "测试版：FreeCAD 1.1.4 + 29 个补丁 + AI 工作台（freecad-ai-parts ${{ inputs.ai_commit }}）。0.3.6 按三本书的发现修了有限元、多体动力学的 8 处错误；0.3.7 把书里 5 个 OCCT 补丁编进安装包（OCCT 7.8.1，源码说明见安装目录 OCCT-patches.txt），0.3.8 修了多体动力学 14 处“结果错了却报正常”的问题（摩擦自锁、过死点、短脉冲、高速转动、初速度、PID 抗饱和、线性化不计控制器、接触恢复系数、带传动打滑等）；书里 16 组 61 个回归测试全过才出包。安装教程见问渠官网下载页。" (Get-ChildItem out\*.exe, out\*.sha256 | ForEach-Object FullName)
