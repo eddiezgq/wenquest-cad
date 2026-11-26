@@ -1,0 +1,54 @@
+# 不重新编译：把一次出包运行（installer.yml）已经做好、已经验收过的安装包附件发布成发布版。
+# 11-26 起因：0.3.8-beta 出包（run 45746923947）验收全过，只有最后“发布”一步因说明文字里的中文引号让 PowerShell 断了字符串而失败；
+# 重跑失败的任务会用原来的工作流（同样失败），全部重编要 3–6 小时。手动运行。
+name: WenQuest CAD publish artifact
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: installer.yml 那次运行的 run id（附件 wqcad-setup 要还在）
+        required: true
+      version:
+        description: 版本号（标签 v<版本>）
+        required: true
+      ai_commit:
+        description: 那次出包用的 freecad-ai-parts 提交（写进发布说明）
+        required: true
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: 取附件、核对散列
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          concl=$(gh api repos/${{ github.repository }}/actions/runs/${{ inputs.run_id }} --jq '.path')
+          case "$concl" in *installer.yml*) ;; *) echo "不是 installer.yml 的运行：$concl"; exit 1;; esac
+          gh run download ${{ inputs.run_id }} -R ${{ github.repository }} -n wqcad-setup -D out
+          ls -la out
+          exe=out/WenQuestCAD-${{ inputs.version }}-Setup.exe
+          test -f "$exe" || { echo "附件里没有 $exe"; exit 1; }
+          want=$(tr -d '\r' < "$exe.sha256" | awk '{print tolower($1)}')
+          got=$(sha256sum "$exe" | awk '{print $1}')
+          test "$want" = "$got" || { echo "散列不符 $want $got"; exit 1; }
+          echo "散列一致：$got"
+      - name: 发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -e
+          target=$(gh api repos/${{ github.repository }}/actions/runs/${{ inputs.run_id }} --jq .head_sha)
+          cat > notes.txt <<NOTES
+          测试版：FreeCAD 1.1.4 + 29 个补丁 + AI 工作台（freecad-ai-parts ${{ inputs.ai_commit }}）。0.3.6 按三本书的发现修了有限元、多体动力学的 8 处错误；0.3.7 把书里 5 个 OCCT 补丁编进安装包（OCCT 7.8.1，源码说明见安装目录 OCCT-patches.txt）；0.3.8 修了多体动力学 14 处「结果错了却报正常」的问题（摩擦自锁、过死点、短脉冲、高速转动、初速度、PID 抗饱和、线性化不计控制器、接触恢复系数、带传动打滑等）；书里 16 组 61 个回归测试全过才出包。安装教程见问渠官网下载页。
+          （出包运行 ${{ inputs.run_id }}，由 publish-artifact.yml 发布）
+          NOTES
+          sed -i 's/^ *//' notes.txt
+          gh release create "v${{ inputs.version }}" --repo ${{ github.repository }} --target "$target" --prerelease \
+            --title "问渠 CAD ${{ inputs.version }}（测试版）" --notes-file notes.txt \
+            out/WenQuestCAD-${{ inputs.version }}-Setup.exe out/WenQuestCAD-${{ inputs.version }}-Setup.exe.sha256
