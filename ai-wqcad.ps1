@@ -3,7 +3,7 @@
 # 可重复运行。不调用 AI 模型，不读写密钥。
 param(
     [string]$Root = "C:\wqcad",
-    [string]$Commit = "5108af0204689613e70d1100484057dff4b31f53"
+    [string]$Commit = "51e62e358730e6e17607a31b58be6bbb91111808"
 )
 
 $ErrorActionPreference = "Continue"
@@ -45,7 +45,7 @@ if (-not (Test-Path (Join-Path $Repo ".git"))) {
 # 仓库的 factory/ 里有 aux.kicad_sch 这类 Windows 保留的文件名：git 默认连登记都拒绝（invalid path）。
 # 只对这个仓库关掉这项检查，并且只取工作台用到的目录（与 freecad_addon/bundle.py 的清单一致），factory/ 不写到硬盘上
 git -C $Repo config core.protectNTFS false
-git -C $Repo sparse-checkout set freecad_addon engine kb analysis assist mcp_server llm_gateway ingest licensing schema data tests examples/ai-design 2>&1 | Write-Host
+git -C $Repo sparse-checkout set freecad_addon engine kb analysis assist mcp_server llm_gateway ingest licensing schema data tests examples/ai-design examples/robots 2>&1 | Write-Host
 git -C $Repo fetch --quiet origin 2>&1 | Write-Host
 git -C $Repo -c advice.detachedHead=false checkout --quiet --force $Commit 2>&1 | Write-Host
 $head = (git -C $Repo rev-parse HEAD).Trim()
