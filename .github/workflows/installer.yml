@@ -7,7 +7,7 @@ on:
     inputs:
       ai_commit:
         description: "freecad-ai-parts 固定提交（同 ai-wqcad.ps1）"
-        default: "51e62e358730e6e17607a31b58be6bbb91111808"
+        default: "8a7b0d6a0dce7d8a6a6a5f6c2e26c8593233a5ce"
       version:
         description: "测试版版本号"
         default: "0.3.8-beta"
