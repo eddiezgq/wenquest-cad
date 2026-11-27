@@ -3,7 +3,7 @@
 # 可重复运行。不调用 AI 模型，不读写密钥。
 param(
     [string]$Root = "C:\wqcad",
-    [string]$Commit = "8a7b0d6a0dce7d8a6a6a5f6c2e26c8593233a5ce"
+    [string]$Commit = "a9dc263043f59179cc6baa155bbde265fa706db9"
 )
 
 $ErrorActionPreference = "Continue"
